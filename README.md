@@ -16,8 +16,8 @@ Tic-Tac-Toe is a classic two-player strategy game played on a 3x3 grid.
 
 ## 🚀 Features
 - **TicTacToe Game Logic**: Complete game implementation with move validation and win detection
-- **Neural Network-Guided MCTS**: MCTS algorithm enhanced with neural network policy and value predictions
-- **Self-Play Training**: AlphaZero-style self-play loop for continuous improvement
+- **Neural Network-Guided MCTS**: MCTS algorithm with neural network policy and value predictions
+- **Self-Play Training**: AlphaZero-style self-play loop
 - **Type of gameplay**: AI vs AI / Human vs Human / AI vs Human
 
 ---

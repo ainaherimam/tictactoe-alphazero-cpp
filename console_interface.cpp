@@ -245,7 +245,7 @@ void selfplay() {
 
       // TRAINING PHASE
       std::cout << "🎯 Training model...\n";
-      train(model, dataset, 64, 15, 1e-3, device);
+      train(model, dataset, batch_size, epoch, learning_rate, device);
       torch::save(model, "checkpoint/" + std::to_string(iter + 2) + ".pt");
 
       // Update last_train_index circularly

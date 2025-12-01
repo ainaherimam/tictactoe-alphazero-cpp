@@ -1,3 +1,5 @@
+## ▶️ Run the project on colab via this [Link](https://colab.research.google.com/drive/10f90xLjmt0aWyRmx28Li5slZwutchoro?usp=sharing)
+
 # TicTacToe with AlphaZero on C++20
 
 A project that implements the AlphaZero algorithm for the classic game of Tic-Tac-Toe using C++20 and Libtorch.

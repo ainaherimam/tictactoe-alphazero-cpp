@@ -1,13 +1,16 @@
 ﻿#include "console_interface.h"
 #include <chrono>
+#include <string>
 #include <thread>
 #include <climits>
-#include <random>
+#include <filesystem>
 
 #include "board.h"
-#include "mcts_agent.h"
-#include "nn_model.h"
+#include "game_dataset.h"
+#include "alphaz_model.h"
 #include "logger.h"
+
+namespace fs = std::filesystem;
 
 
 bool is_integer(const std::string& s) {
@@ -104,9 +107,9 @@ std::unique_ptr<Mcts_player> create_mcts_agent(
 
     torch::Device device(torch::kCUDA);
     if (!torch::cuda::is_available()) device = torch::kCPU;
-    auto eval_model = AlphaZeroNetWithMaskImpl::load_model("checkpoint/1.pt");
-    eval_model->to(device);
-    eval_model->eval();
+    auto best_model  = AlphaZModel::load_model("checkpoint/best.pt");
+    best_model->to(device);
+    best_model->eval();
 
     std::cout << "\nInitializing " << agent_prompt << ":\n";
 
@@ -120,7 +123,7 @@ std::unique_ptr<Mcts_player> create_mcts_agent(
 
     LogLevel log_level = LogLevel::NONE;
     log_level = static_cast<LogLevel>(get_parameter_within_bounds("Log Level (0:None  -- 5:Full)  : ", 0, 5));
-    return std::make_unique<Mcts_player>(exploration_constant, max_iteration,log_level, 0.0, 0.3, 0.25, eval_model, -1, false);
+    return std::make_unique<Mcts_player>(exploration_constant, max_iteration,log_level, 0.0, 0.2, 0.15, best_model, -1, false);
     }
 
 void countdown(int seconds) {
@@ -168,103 +171,437 @@ void start_robot_arena() {
 
 
 void selfplay() {
-  torch::manual_seed(0);
-  torch::Device device(torch::kCUDA);
-  if (!torch::cuda::is_available()) device = torch::kCPU;
+    torch::manual_seed(0);
+    torch::Device device(torch::kCUDA);
+    if (!torch::cuda::is_available()) device = torch::kCPU;
+    
+    int replay_buffer_size = 7500;
+    GameDataset dataset(replay_buffer_size);
+    
+    // THE MODEL USED FOR INFERENCE
+    std::string best_model_path = "checkpoint/best.pt";
+    auto best_model = AlphaZModel::load_model(best_model_path);
+    best_model->to(device);
+    best_model->eval();
+    
+    // HYPERPARAMETERS
+    double exploration_factor = 0.6;
+    int number_iteration = 500;
+    float temperature = 1.0; // Changed in the Game object to varies depending on the game loss.
+    float dirichlet_alpha = 0.2;
+    float dirichlet_epsilon = 0.15;
+    int max_depth = -1; // Still not implemented
+    bool tree_reuse = false; // Still not implemented
+    
+    // TRAINING HYPERPARAMETERS
+    int num_iterations = 30;
+    int games_per_iteration = 200;
+    int training_steps = 150;
+    int batch_size = 128;
+    double learning_rate = 1e-3;
+    
+    std::cout << "🌱 Starting AlphaZero self-play training...\n";
+    
+    int total_games = 0;
+    
+    for (int iteration = 1; iteration <= num_iterations; ++iteration) {
+        std::cout << "\n========================================\n";
+        std::cout << "🔁 ITERATION " << iteration << "/" << num_iterations << "\n";
+        std::cout << "========================================\n\n";
+        
+        // SELF-PLAY
+        std::cout << "🎮 Playing " << games_per_iteration << " self-play games...\n";
+        
+        for (int game_num = 0; game_num < games_per_iteration; ++game_num) {
+            Game game(
+                9,
+                std::make_unique<Mcts_player>(
+                    exploration_factor, number_iteration, LogLevel::NONE, 
+                    temperature, dirichlet_alpha, dirichlet_epsilon, 
+                    best_model, max_depth, tree_reuse
+                ),
+                std::make_unique<Mcts_player>(
+                    exploration_factor, number_iteration, LogLevel::NONE, 
+                    temperature, dirichlet_alpha, dirichlet_epsilon, 
+                    best_model, max_depth, tree_reuse
+                ),
+                dataset,
+                false
+            );
+            
+            Cell_state winner = game.play();
+            total_games++;
+            
+            if ((game_num + 1) % 10 == 0 || (game_num + 1) == games_per_iteration) {
+                std::cout << "  Games: " << (game_num + 1) << "/" << games_per_iteration
+                          << " | Buffer: " << dataset.current_size << "/" << replay_buffer_size;
+            }
+        }
+        
+        std::cout << "✅ Total games played: " << total_games << "\n";
+        std::cout << "📊 Replay buffer size: " << dataset.current_size << "/" << replay_buffer_size << "\n\n";
+        
+        // TRAINING
+        auto candidate_model = AlphaZModel::load_model(best_model_path);
+        candidate_model->to(device);
 
-  //DATASET
-  int data_number = 2000;
-  int train_every = 500;
-  int last_train_index = 0;
-  GameDataset dataset(data_number);
+        std::cout << "🎯 Training network for " << training_steps << " steps...\n";
 
-  //THE MODEL TO TRAIN
-  AlphaZeroNetWithMask model;
+        train(candidate_model, dataset, batch_size, training_steps, learning_rate, device, 5, false);
 
-  //HYPERPARAMETERS
-  double exploration_factor = 1.41;
-  int number_iteration = 100;
-  float temperature = 0.0;
-  float dirichlet_alpha = 0.3;
-  float dirichlet_epsilon = 0.25;
-  int max_depth = -1;
-  bool tree_reuse = false;
+        
 
-  //TRAINING HYPERPARAMETERS
-  int batch_size = 64;
-  int epoch = 15;
-  double learning_rate = 1e-3;
+        // SAVE CHECKPOINT
+        std::string checkpoint_path = "checkpoint/iter_" + std::to_string(iteration) + ".pt";
+        candidate_model->save_model(checkpoint_path);
+        
 
-  auto eval_model = AlphaZeroNetWithMaskImpl::load_model("checkpoint/1.pt");
-  eval_model->to(device);
-  eval_model->eval();  // Set to evaluation mode
+        // EVALUATION
+        std::cout << "⚔️  Evaluating new model vs current best...\n";
+        if (iteration % 3==0){
+          evaluate(best_model_path, checkpoint_path);
+        }
+        
+        //clean();
+        
+        std::cout << "\n✅ Iteration " << iteration << " complete!\n";
+        //dataset.print_analysis();
 
-  std::cout << "🌱 Starting self-play...\n";
-
-  int cycles = ceil(data_number / train_every);
-  int game_counter = 0;
-
-  for (int iter = 1; iter <= cycles; ++iter)
-  {
-      std::cout << "\n=============================\n";
-      std::cout << "🔁 TRAINING CYCLE " << iter << "\n";
-      std::cout << "=============================\n\n";
-      std::cout << "🌱 Collecting Data...\n";
-
-      // SELF-PLAY PHASE
-      int moves_since_last_train;
-
-      if (dataset.next_index >= last_train_index)
-          moves_since_last_train = dataset.next_index - last_train_index;
-      else
-          moves_since_last_train = (data_number - last_train_index) + dataset.next_index;
-
-      // Play games until we reach the training threshold
-      while (moves_since_last_train < train_every)
-      {
-          Game game(9,
-                    std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, temperature, dirichlet_alpha, dirichlet_epsilon, eval_model, max_depth, tree_reuse),
-                    std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, temperature, dirichlet_alpha, dirichlet_epsilon, eval_model, max_depth, tree_reuse),
-                    dataset,
-                    true);
-
-          Cell_state winner = game.play();
-          game_counter++;
-
-          if (dataset.next_index >= last_train_index)
-              moves_since_last_train = dataset.next_index - last_train_index;
-          else
-              moves_since_last_train = (data_number - last_train_index) + dataset.next_index;
-
-          std::cout << game_counter << " Games completed - Stored positions: "
-                    << dataset.current_size << "/" << data_number
-                    << " - Player " << winner << " won\n";
-      }
-      
-      std::cout << "✅ Replay buffer ready (" << dataset.current_size << " samples)\n";
-
-      // TRAINING PHASE
-      std::cout << "🎯 Training model...\n";
-      train(model, dataset, batch_size, epoch, learning_rate, device);
-      torch::save(model, "checkpoint/" + std::to_string(iter + 2) + ".pt");
-
-      // Update last_train_index circularly
-      last_train_index = (last_train_index + train_every) % data_number;
-  }
-  // Save the actual dataset to disk
-  dataset.save("my_dataset");
+        if (iteration % 3 ==0){
+          dataset.save("dataset"+std::to_string(iteration));
+        }
+    }
+    dataset.save("checkpoint/dataset");
+    std::cout << "\n🎉 Training complete! Total games played: " << total_games << "\n";
 }
 
 void init() {
     torch::manual_seed(0);
     torch::Device device(torch::kCUDA);
     if (!torch::cuda::is_available()) device = torch::kCPU;
-
-    AlphaZeroNetWithMask model;
-    torch::save(model, "checkpoint/1.pt");
-    std::cout << "✅ Model saved successfully!\n";
+    
+    auto model = std::make_shared<AlphaZModel>();
+    model->save_model("checkpoint/best.pt");
 }
 
+int clean() {
+    std::string folder = "checkpoint";
+
+    for (const auto& entry : fs::directory_iterator(folder)) {
+        if (entry.is_regular_file()) {
+            fs::path p = entry.path();
+
+            // Check if extension is ".pt"
+            if (p.extension() == ".pt") {
+                // Check if the filename is numeric.pt
+                std::string name = p.stem().string(); // before .pt
+
+                bool numeric = true;
+                for (char c : name) {
+                    if (!isdigit(c)) {
+                        numeric = false;
+                        break;
+                    }
+                }
+
+                // If numeric, remove
+                if (numeric) {
+                    std::cout << "Removing: " << p << "\n";
+                    fs::remove(p);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+void evaluate(std::string best_model_path, std::string candidate_model_path){
+
+  std::string best_filename = best_model_path.substr(best_model_path.find_last_of("/\\") + 1);
+  std::string candidate_filename = candidate_model_path.substr(candidate_model_path.find_last_of("/\\") + 1);
+  
+  // std::cout << "Testing: " << best_filename << " VS " << candidate_filename << std::endl;
+  
+  GameDataset dataset(1000);
+  torch::manual_seed(0);
+  torch::Device device(torch::kCUDA);
+  if (!torch::cuda::is_available()) device = torch::kCPU;
+
+  // THE MODEL USED FOR INFERENCE
+  auto best_model = AlphaZModel::load_model(best_model_path);
+  best_model->to(device);
+  best_model->eval();
+
+  auto candidate_model  = AlphaZModel::load_model(candidate_model_path);
+  candidate_model->to(device);
+  candidate_model->eval();
+
+  // HYPERPARAMETERS
+  double exploration_factor = 1.41;
+  int number_iteration = 100;
+  float temperature = 0.0;  // Deterministic for evaluation
+  float dirichlet_alpha = 0.3;
+  float dirichlet_epsilon = 0.0;  // No exploration noise during evaluation
+  int max_depth = -1;
+  bool tree_reuse = false;
+
+  int game_counter = 0;
+  int best_win = 0;
+  int candidate_win = 0;
+  int draw = 0;
+  int game_number = 400;  // AlphaZero suggest 400 games for statistical significance.
+
+  std::cout << "\n=============================\n";
+  std::cout << "🔁 ALPHAZERO EVALUATION \n";
+  std::cout << "=============================\n\n";
+
+  std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Best as X, Candidate as O\n\n";
+
+  while (game_counter < game_number/2)
+  {
+      if ((game_counter + 1) % 20 == 0 || game_counter == 0) {
+          std::cout << "Game " << game_counter + 1 << "/" << game_number/2 
+                    << " | Best: " << best_win 
+                    << " Candidate: " << candidate_win 
+                    << " Draws: " << draw << "\n";
+      }
+
+      Game game(9,
+                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
+                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
+                                              best_model, max_depth, tree_reuse),
+                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
+                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
+                                              candidate_model, max_depth, tree_reuse),
+                dataset,
+                true);
+
+      Cell_state winner = game.play();
+      if (winner == Cell_state::X){
+        best_win++;
+      }
+      else if (winner == Cell_state::O){
+        candidate_win++;
+      }
+      else{
+        draw++;
+      }
+
+      game_counter++;
+  }
+
+
+  std::cout << "▶ Phase 2: Playing " << game_number / 2 << "games - Candidate as X, Best as O\n\n";
+
+  while (game_counter < game_number)
+  {
+      if ((game_counter - game_number/2 + 1) % 20 == 0 || game_counter == game_number/2) {
+          std::cout << "Game " << game_counter + 1 << "/" << game_number 
+                    << " | Best: " << best_win 
+                    << " Candidate: " << candidate_win 
+                    << " Draws: " << draw << "\n";
+      }
+
+      Game game(9,
+                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
+                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
+                                              candidate_model, max_depth, tree_reuse),
+                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
+                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
+                                              best_model, max_depth, tree_reuse),
+                dataset,
+                true);
+
+      Cell_state winner = game.play();
+      if (winner == Cell_state::X){
+        candidate_win++;
+      }
+      else if (winner == Cell_state::O){
+        best_win++;
+      }
+      else{
+        draw++;
+      }
+
+      game_counter++;
+  }
+
+
+  //Scoring: win=1, draw=0.5, loss=0
+  float candidate_score = candidate_win + (draw * 0.5f);
+  float best_score = best_win + (draw * 0.5f);
+  
+  float candidate_winrate = (candidate_score / game_number) * 100.0f;
+  float best_winrate = (best_score / game_number) * 100.0f;
+  
+  std::cout << "\n=============================\n";
+  std::cout << "🏁 EVALUATION COMPLETE\n";
+  std::cout << "=============================\n";
+  std::cout << "Results:\n";
+  std::cout << "  Best model wins     : " << best_win << "/" <<game_number<<"\n";
+  std::cout << "  Candidate wins      : " << candidate_win << "/" <<game_number<<"\n";
+  std::cout << "  Draws               : " << draw << "/" <<game_number<<"\n";
+  
+  std::cout << std::fixed << std::setprecision(2);
+  std::cout << "Win Rates:\n";
+  std::cout << "  Best model          : " << best_winrate << "%\n";
+  std::cout << "  Candidate           : " << candidate_winrate << "%\n\n";
+  
+
+  const float REPLACEMENT_THRESHOLD = 55.0f;
+  bool should_replace = (candidate_winrate >= REPLACEMENT_THRESHOLD);
+  
+  if (should_replace) {
+      std::cout << "✅ Candidate achieves >= " << REPLACEMENT_THRESHOLD << "% win rate. Promoting to best model...\n\n";
+      
+      // Archive old best model
+      fs::path oldFile = best_model_path;
+      std::string baseName = "best-old-";
+      std::string extension = ".pt";
+      int counter = 1;
+      fs::path newFile;
+      
+      do {
+          newFile = oldFile.parent_path() / (baseName + std::to_string(counter) + extension);
+          counter++;
+      } while (fs::exists(newFile));
+      
+      try {
+          fs::rename(oldFile, newFile);
+          fs::copy_file(candidate_model_path, best_model_path);
+          std::cout << "💾 Best model updated: " << best_model_path << "\n";
+      } catch (const std::exception &e) {
+          std::cerr << "❌ Error updating best model: " << e.what() << '\n';
+      }
+  } else {
+      std::cout << "❌ Candidate achieves < " << REPLACEMENT_THRESHOLD << "%. Current best model kept.\n";
+  }
+    
+}
+
+void evaluate_vs_minimax(){
+
+  GameDataset dataset(1000);
+  torch::manual_seed(0);
+  torch::Device device(torch::kCUDA);
+  if (!torch::cuda::is_available()) device = torch::kCPU;
+
+  auto last_model  = AlphaZModel::load_model("checkpoint/best.pt");
+  last_model->to(device);
+  last_model->eval();
+
+  // HYPERPARAMETERS
+  double exploration_factor = 1.41;
+  int number_iteration = 500;
+  float temperature = 0.0;
+  float dirichlet_alpha = 0.3;
+  float dirichlet_epsilon = 0.25;
+  int max_depth = -1;
+  bool tree_reuse = false;
+
+  int game_counter = 0;
+  int minimax_win = 0;
+  int best_model_win = 0;
+  int draw = 0;
+  int game_number = 2;
+
+  std::cout << "\n=============================\n";
+  std::cout << "🔁 EVALUATION VS MINIMAX\n";
+  std::cout << "=============================\n\n";
+
+  std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Minimax as X, Candidate as O\n\n";
+
+  while (game_counter < game_number / 2)
+  {
+      std::cout << "Game " << game_counter + 1 << " | Minimax = X | Best = O ... ";
+
+      Game game(9,
+                std::make_unique<Minimax_player>(16, true, LogLevel::EVERYTHING),
+                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE,
+                                              temperature, dirichlet_alpha, dirichlet_epsilon,
+                                              last_model, max_depth, tree_reuse),
+                dataset,
+                true);
+
+      Cell_state winner = game.play();
+
+      if (winner == Cell_state::X){
+        minimax_win++;
+        std::cout << "Winner: Minimax";
+      }
+      else if (winner == Cell_state::O){
+        best_model_win++;
+        std::cout << "Winner: Best model";
+      }
+      else {
+        draw++;
+        std::cout << "Draw";
+      }
+
+      std::cout << " | Score → Minimax: " << minimax_win
+                << " Best: " << best_model_win << "\n";
+
+      game_counter++;
+  }
+ 
+  std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Best as X, Minimax as O\n\n";
+
+  while (game_counter < game_number)
+  {
+      std::cout << "Game " << game_counter + 1 << " | Best = X | Minimax = O ... ";
+
+      Game game(9,
+                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE,
+                                              temperature, dirichlet_alpha, dirichlet_epsilon,
+                                              last_model, max_depth, tree_reuse),
+                std::make_unique<Minimax_player>(16, true, LogLevel::EVERYTHING),
+                dataset,
+                true);
+
+      Cell_state winner = game.play();
+
+      if (winner == Cell_state::X){
+        best_model_win++;
+        std::cout << "Winner: Best model";
+      }
+      else if (winner == Cell_state::O){
+        minimax_win++;
+        std::cout << "Winner: Minimax";
+      }
+      else {
+        draw++;
+        std::cout << "Draw";
+      }
+
+      std::cout << " | Score → Minimax: " << minimax_win
+                << " Best: " << best_model_win << "\n";
+
+      game_counter++;
+  } 
+
+  std::cout << "\n=============================\n";
+  std::cout << "🏁 EVALUATION COMPLETE\n";
+  std::cout << "=============================\n";
+
+  std::cout << "✅ Minimax wins      : " << minimax_win << "\n";
+  std::cout << "✅ Best model wins   : " << best_model_win << "\n";
+  std::cout << "🤝 Draws             : " << draw << "\n";
+
+  if (minimax_win + best_model_win > 0){
+    float minimax_winrate =
+        minimax_win / static_cast<float>(minimax_win + best_model_win) * 100.0f;
+
+    float best_model_winrate =
+        best_model_win / static_cast<float>(minimax_win + best_model_win) * 100.0f;
+
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "📊 Minimax winrate   : " << minimax_winrate << "%\n";
+    std::cout << "📊 Best model winrate: " << best_model_winrate << "%\n\n";
+  }
+  else{
+    std::cout << "⚠️  All games were draws\n\n";
+  }
+}
 
 void start_human_arena() {
   GameDataset dataset(1000);
@@ -272,6 +609,15 @@ void start_human_arena() {
   auto human_player_1 = std::make_unique<Human_player>();
   auto human_player_2 = std::make_unique<Human_player>();
   Game game(board_size, std::move(human_player_1), std::move(human_player_2), dataset);
+  game.simple_play();
+}
+
+void vs_minimax() {
+  GameDataset dataset(1000);
+  int board_size = 9;
+  auto human_player_2 = std::make_unique<Human_player>();
+  Game game(board_size, std::make_unique<Minimax_player>(16, true, LogLevel::EVERYTHING),std::move(human_player_2), dataset);
+  std::cout << "Here";
   game.simple_play();
 }
 
@@ -286,11 +632,13 @@ void run_console_interface() {
                 << "[1] Human player vs Human player\n"
                 << "[2] AI player vs AI player\n"
                 << "[3] Human player vs AI player\n"
-                << "[4] Initialize NN\n"
+                << "[4] Initialize NN to random weights\n"
                 << "[5] Launch Self-Play\n"
-                << "[6] (H)Exit\n";
+                << "[6] Player against Minimax\n"
+                << "[7] Evaluate best model vs Minimax\n"
+                << "[8] (H)Exit\n";
 
-      option = get_parameter_within_bounds("Option: ", 1, 6);
+      option = get_parameter_within_bounds("Option: ", 1, 9);
       std::cout << "\n";
 
       switch (option) {
@@ -310,6 +658,12 @@ void run_console_interface() {
           selfplay();
           break;
         case 6:
+          vs_minimax();
+          break;
+        case 7:
+          evaluate_vs_minimax();
+          break;
+        case 8:
           is_running = false;
           break;
         default:
@@ -353,3 +707,4 @@ Thank you!!!
               ┛         
 )" << '\n';
 }
+

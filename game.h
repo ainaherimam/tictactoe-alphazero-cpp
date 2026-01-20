@@ -6,7 +6,7 @@
 #include "board.h"
 #include "cell_state.h"
 #include "player.h"
-#include "nn_model.h"
+#include "alphaz_model.h"
 
 /**
  * @class Game
@@ -28,11 +28,11 @@ class Game {
    * @param player_1 Unique pointer to the first player.
    * @param player_2 Unique pointer to the second player.
    * @param dataset Reference to the game dataset for storing game data.
-   * @param verbose Flag to enable verbose output (default: false).
+   * @param evaluation Flag for evaluation (default: false).
    */
   Game(int board_size, std::unique_ptr<Player> player_1,
        std::unique_ptr<Player> player_2,
-       GameDataset& dataset, bool verbose = false);
+       GameDataset& dataset, bool evaluation = false);
 
   /**
    * @brief Converts a move array to its string representation.
@@ -60,12 +60,18 @@ class Game {
    */
   Cell_state simple_play();
 
+  Cell_state evaluate_play();
+
+  const Board& getBoard() const {
+        return board;
+    }
+
  private:
   Board board;
   std::unique_ptr<Player> players[2];
   int current_player_index;
   std::vector<torch::Tensor> result_z;
-  bool verbose = true;
+  bool evaluation = false;
 
   /**
    * @brief A cirular replay buffer

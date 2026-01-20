@@ -2,7 +2,7 @@
 
 # TicTacToe with AlphaZero on C++20
 
-A project that implements the AlphaZero algorithm for the classic game of Tic-Tac-Toe using C++20 and Libtorch.
+A project that implements the AlphaZero algorithm for the classic game of Tic-Tac-Toe (4x4) using C++20 and Libtorch.
 
 ![img1](./images/tictactoe.png)
 
@@ -10,15 +10,14 @@ A project that implements the AlphaZero algorithm for the classic game of Tic-Ta
 
 ## 📖 About TicTacToe
 
-Tic-Tac-Toe is a classic two-player strategy game played on a 3x3 grid. 
+Tic-Tac-Toe is a classic two-player strategy game played on a traditional 3x3 grid. On this implementation we choose 4x4 grid.
 
 ---
 
 ## 🚀 Features
-- **TicTacToe Game Logic**: Complete game implementation with move validation and win detection
 - **Neural Network-Guided MCTS**: MCTS algorithm with neural network policy and value predictions
 - **Self-Play Training**: AlphaZero-style self-play loop
-- **Type of gameplay**: AI vs AI / Human vs Human / AI vs Human
+- **Type of gameplay**: AI vs AI / Human vs Human / AI vs Human / Human vs Minimax
 
 ---
 

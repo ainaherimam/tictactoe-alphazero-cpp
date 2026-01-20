@@ -7,30 +7,13 @@
 #include <memory>
 #include <mutex>
 #include <random>
-#include <sstream>
-#include <thread>
+
 
 #include "mcts_agent.h"
-#include "nn_model.h"
+#include "alphaz_model.h"
 #include "logger.h"
 
 
-NeuralN::NeuralN(const std::string& model_path, torch::Device device_) : device(device_) {
-    try {
-        model = AlphaZeroNetWithMaskImpl::load_model(model_path);
-        model->to(device);
-        model->eval();
-    } catch (const c10::Error& e) {
-        throw;
-    }
-}
-
-std::pair<torch::Tensor, torch::Tensor> NeuralN::predict(torch::Tensor input, torch::Tensor legal_mask) {
-    torch::NoGradGuard no_grad;
-    input = input.to(device);
-    if (legal_mask.defined()) legal_mask = legal_mask.to(device);
-    return model->forward(input, legal_mask);
-}
 
 Mcts_agent::Mcts_agent(double exploration_factor,
                          int number_iteration,
@@ -38,7 +21,7 @@ Mcts_agent::Mcts_agent(double exploration_factor,
                          float temperature,
                          float dirichlet_alpha,
                          float dirichlet_epsilon,
-                         torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network,
+                         std::shared_ptr<AlphaZModel> network,
                          int max_depth,
                          bool tree_reuse)
     : exploration_factor(exploration_factor),
@@ -50,7 +33,9 @@ Mcts_agent::Mcts_agent(double exploration_factor,
       network(network),
       max_depth(max_depth),
       random_generator(std::random_device{}()),
-      tree_reuse(tree_reuse) { }
+      tree_reuse(tree_reuse) { 
+        network->eval();
+      }
 
 Mcts_agent::Node::Node(Cell_state player, std::array<int, 4> move, float prior_proba, float value_from_nn,
                        std::shared_ptr<Node> parent_node)
@@ -128,11 +113,12 @@ float Mcts_agent::initiate_and_run_nn(const std::shared_ptr<Node>& node, const B
 
     torch::Tensor input = board.to_tensor(current_player).unsqueeze(0);
     torch::Tensor legal_mask = board.get_legal_mask(current_player).unsqueeze(0);
-
+    
     auto [policy, value] = network->predict(input, legal_mask);
 
     std::vector<std::pair<std::array<int, 4>, float>> move_with_logit = get_moves_with_probs(policy);
     
+    //Dive deeper
     logger->log_nn_evaluation(node->move, value.item<float>(), move_with_logit.size());
 
     std::vector<float> noise;
@@ -169,6 +155,7 @@ float Mcts_agent::initiate_and_run_nn(const std::shared_ptr<Node>& node, const B
     return value.item<float>();
 }
 
+
 void Mcts_agent::perform_mcts_iterations(int number_iteration, int& mcts_iteration_counter, const Board& board) {
     int count = 0;
     while (mcts_iteration_counter < number_iteration) {
@@ -194,8 +181,8 @@ void Mcts_agent::perform_mcts_iterations(int number_iteration, int& mcts_iterati
 std::pair<std::shared_ptr<Mcts_agent::Node>, torch::Tensor> Mcts_agent::sample_child_and_get_policy(
     const std::shared_ptr<Node>& parent_node) const {
     
-    const int X = 3;
-    const int Y = 3;
+    const int X = 4;
+    const int Y = 4;
     const int DIR = 1;
     const int TAR = 1; 
     const int total_size = X * Y * DIR * TAR;
@@ -266,8 +253,8 @@ std::pair<std::shared_ptr<Mcts_agent::Node>, torch::Tensor> Mcts_agent::sample_c
 
 std::vector<std::pair<std::array<int, 4>, float>> Mcts_agent::get_moves_with_probs(
     const torch::Tensor& log_probs_tensor) const {
-    const int X = 3;
-    const int Y = 3;
+    const int X = 4;
+    const int Y = 4;
     const int DIR = 1;
     const int TAR = 1;
     const int total = X * Y * DIR * TAR;
@@ -356,8 +343,9 @@ double Mcts_agent::calculate_puct_score(const std::shared_ptr<Node>& child_node,
 
 float Mcts_agent::simulate_random_playout(const std::shared_ptr<Node>& node, Board board) {
 
+    //The check here are from the actual node point of view.
     Cell_state winner = board.check_winner();
-    if (winner == root->player) {
+    if (winner == node->player) {
         logger->log_simulation_end(1.0);
         return 1.0;  // current player won
 
@@ -375,18 +363,19 @@ void Mcts_agent::backpropagate(std::shared_ptr<Node>& node, float value) {
 
     std::shared_ptr<Node> current_node = node;
     while (current_node != nullptr) {
+        
         // Lock the node's mutex before updating its data
         std::lock_guard<std::mutex> lock(current_node->node_mutex);
 
-        //Check if the current node parent is similar to the root player
-        if (current_node->parent_node != nullptr && current_node->parent_node->player != root->player) {
-            current_node->acc_value -= value;
-        } else {
-            current_node->acc_value += value;
-        }
+        // Negate because node stores parent's perspective but value is from node's perspective
+        value = -value;
+
+        current_node->acc_value += value;
+
         // Increment the node's visit count
         current_node->visit_count += 1;
         // Update accumulated value of the node
+        
         current_node->value_from_mcts = current_node->acc_value / current_node->visit_count;
 
         logger->log_backpropagation_result(current_node->move, 
@@ -394,6 +383,7 @@ void Mcts_agent::backpropagate(std::shared_ptr<Node>& node, float value) {
                                     current_node->visit_count);
 
         // Move to the parent node for the next loop
+        
         current_node = current_node->parent_node;
     }
 }

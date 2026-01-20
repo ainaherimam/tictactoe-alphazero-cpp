@@ -6,7 +6,7 @@
 
 #include "board.h"
 #include "logger.h"
-#include "nn_model.h"
+#include "alphaz_model.h"
 #include <torch/torch.h>
 
 /**
@@ -28,10 +28,12 @@ class Player {
   virtual std::pair<std::array<int, 4>, torch::Tensor> choose_move(
       const Board& board,
       Cell_state player) = 0;
+  
+  virtual ~Player() = default;
 };
 
 /**
- * @brief The Human_player class is a concrete class that inherits from Player,
+ * @brief The Human_player class is a class that inherits from Player,
  * implementing the choose_move() function to allow user input for move selection,
  * with validation to ensure the move is legitimate
  */
@@ -58,8 +60,8 @@ class Mcts_player : public Player {
   /**
    * @brief Mcts_player constructor initializes MCTS parameters
    *
-   * @param exploration_factor Exploration factor for MCTS (PUCT constant)
-   * @param number_iteration Maximum iteration number for MCTS simulations
+   * @param exploration_factor Exploration factor (PUCT constant)
+   * @param number_iteration Iteration number for MCTS simulations
    * @param log_level Log Level for debugging output
    * @param temperature Temperature parameter for action selection 
    * @param dirichlet_alpha Alpha parameter for Dirichlet noise 
@@ -74,7 +76,7 @@ class Mcts_player : public Player {
               float temperature = 0.0f,
               float dirichlet_alpha = 0.3f,
               float dirichlet_epsilon = 0.25f,
-              torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network = nullptr,
+              std::shared_ptr<AlphaZModel> network = nullptr,
               int max_depth = -1,
               bool tree_reuse = false);
 
@@ -96,7 +98,21 @@ class Mcts_player : public Player {
    * @return The verbose level
    */
   LogLevel get_verbose_level() const;
+  
   void set_temperature(float temp);
+  float get_temperature() const;
+  
+  void set_exploration_factor(double factor);
+  double get_exploration_factor() const;
+  
+  void set_number_iteration(int iterations);
+  int get_number_iteration() const;
+  
+  void set_dirichlet_alpha(float alpha);
+  float get_dirichlet_alpha() const;
+  
+  void set_dirichlet_epsilon(float epsilon);
+  float get_dirichlet_epsilon() const;
 
 
  private:
@@ -106,39 +122,31 @@ class Mcts_player : public Player {
   float temperature;
   float dirichlet_alpha;
   float dirichlet_epsilon;
-  torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network;  
+  std::shared_ptr<AlphaZModel> network;  
   int max_depth;
   bool tree_reuse;
 };
 
-/**
- * @brief PolicyNetwork_player uses a neural network's policy head directly
- * to choose moves without MCTS search
- *
- * This player evaluates the board position using a trained neural network
- * and selects moves based on the policy output, optionally with temperature
- * sampling for exploration.
- */
-class PolicyNetwork_player : public Player {
+class Minimax_player : public Player {
  public:
   /**
-   * @brief Constructor for PolicyNetwork_player
+   * @brief Constructor for Minimax_player
    *
-   * @param network Neural network model for policy evaluation
-   * @param temperature Temperature for action selection
+   * @param max_depth Maximum search depth for minimax algorithm
+   * @param use_alpha_beta Whether to use alpha-beta pruning optimization
    * @param log_level Log level for debugging output
    */
-  PolicyNetwork_player(torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network,
-                       float temperature = 0.0f,
-                       LogLevel log_level = LogLevel::NONE);
+  Minimax_player(int max_depth,
+                 bool use_alpha_beta = true,
+                 LogLevel log_level = LogLevel::NONE);
 
   /**
-   * @brief Implementation of choose_move using neural network policy
+   * @brief Implementation of choose_move using minimax algorithm
    *
    * @param board The current state of the game board
    * @param player The current player
    *
-   * @return The chosen move as an array of integers and policy tensor
+   * @return The chosen move as an array of integers and dummy policy tensor
    */
   std::pair<std::array<int, 4>, torch::Tensor> choose_move(
       const Board& board,
@@ -150,11 +158,14 @@ class PolicyNetwork_player : public Player {
    * @return The verbose level
    */
   LogLevel get_verbose_level() const;
+  
+  void set_max_depth(int depth);
+  int get_max_depth() const;
 
  private:
-  torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network;  // Neural network model
-  float temperature;          // Temperature for move selection
-  LogLevel log_level;         // Verbose level
+  int max_depth;
+  bool use_alpha_beta;
+  LogLevel log_level;
 };
 
 #endif

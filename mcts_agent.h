@@ -7,38 +7,9 @@
 #include <vector>
 
 #include "board.h"
-#include "nn_model.h"
+#include "alphaz_model.h"
 #include "logger.h"
 
-/**
- * @brief Neural network wrapper for AlphaZero-style policy and value prediction
- *
- * Provides an interface to the neural network model for MCTS guidance.
- */
-class NeuralN {
-public:
-    /**
-     * @brief Constructs a neural network wrapper
-     *
-     * @param model_path Path to the saved model file
-     * @param device Torch device to run inference on (CPU or CUDA)
-     */
-    NeuralN(const std::string& model_path, torch::Device device = torch::kCPU);
-
-    /**
-     * @brief Predicts policy and value for a given board state
-     *
-     * @param input Tensor representing the current board state
-     * @param legal_mask Tensor masking illegal moves
-     *
-     * @return Pair of tensors: (policy logits, value estimate)
-     */
-    std::pair<torch::Tensor, torch::Tensor> predict(torch::Tensor input, torch::Tensor legal_mask);
-
-private:
-    torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> model;
-    torch::Device device;
-};
 
 /**
  * @brief Implements a Monte Carlo Tree Search (MCTS) agent for decision-making in games
@@ -72,7 +43,7 @@ public:
               float temperature = 1.0f,
               float dirichlet_alpha = 0.3f,
               float dirichlet_epsilon = 0.25f,
-              torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network = nullptr,
+              std::shared_ptr<AlphaZModel> network = nullptr,
               int max_depth = -1,
               bool tree_reuse = false);
 
@@ -108,7 +79,7 @@ public:
     void random_move(Board& board, Cell_state player, int random_move_number);
 
 private:
-    std::shared_ptr<NeuralN> agent;
+    std::shared_ptr<AlphaZModel> network;
     double exploration_factor;
     int number_iteration;
     LogLevel log_level;
@@ -118,7 +89,6 @@ private:
     float temperature;          // Temperature for move selection
     float dirichlet_alpha;      // Alpha parameter for Dirichlet noise
     float dirichlet_epsilon;    // Epsilon for Dirichlet noise mixing
-    torch::nn::ModuleHolder<AlphaZeroNetWithMaskImpl> network;  // Neural network model
     int max_depth;              // Maximum search depth
     bool tree_reuse;            // Whether to reuse search tree
 

@@ -7,7 +7,8 @@
 #include <stdexcept>
 
 #include "game.h"
-#include "nn_model.h"
+#include "alphaz_model.h"
+#include "game_dataset.h"
 
 /**
  * @brief Checks if the input string is an integer.
@@ -148,9 +149,20 @@ void run_console_interface();
 void init();
 
 /**
- * @brief This initialize The full self play loop
+ * @brief This initialize the full self play loop
  */
 void selfplay();
+
+/**
+ * @brief Evaluate if the candidate model perform better than , with the same MCTS 
+ * seach parameters but guided by 2 differents models.
+ */
+void evaluate(std::string eval_model_path, std::string last_model_path);
+
+/**
+ * @brief Clean old data training checkpoints.
+ */
+int clean();
 
 /**
  * @brief Prints welcome message in ASCII art.

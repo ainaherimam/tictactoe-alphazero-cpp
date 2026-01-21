@@ -1,5 +1,5 @@
-#ifndef MCTS_AGENT_H
-#define MCTS_AGENT_H
+#ifndef MCTS_AGENT_PARALLEL_H
+#define MCTS_AGENT_PARALLEL_H
 
 #include <memory>
 #include <mutex>
@@ -7,9 +7,10 @@
 #include <vector>
 
 #include "board.h"
+#include "game_dataset.h"
 #include "alphaz_model.h"
 #include "logger.h"
-
+#include "tensor_pool.h"
 
 /**
  * @brief Implements a Monte Carlo Tree Search (MCTS) agent for decision-making in games
@@ -22,7 +23,7 @@
  *       `check_winner()` methods, and a `Cell_state` enum with `Empty`, `X`, and `O`.
  */
 
-class Mcts_agent {
+class Mcts_agent_parallel {
 public:
     /**
      * @brief Constructs a new MCTS agent
@@ -37,7 +38,7 @@ public:
      * @param max_depth Maximum search depth for MCTS (default: -1, unlimited)
      * @param tree_reuse Whether to reuse the search tree between moves (default: false)
     */
-    Mcts_agent(double exploration_factor,
+    Mcts_agent_parallel(double exploration_factor,
               int number_iteration,
               LogLevel log_level = LogLevel::NONE,
               float temperature = 1.0f,
@@ -45,7 +46,10 @@ public:
               float dirichlet_epsilon = 0.25f,
               std::shared_ptr<AlphaZModel> network = nullptr,
               int max_depth = -1,
-              bool tree_reuse = false);
+              bool tree_reuse = false,
+              float virtual_loss = 1.0f,
+              int num_workers = 4,
+              int nn_batch_size = 8);
 
     /**
      * @brief Selects the best move using Monte Carlo Tree Search (MCTS)
@@ -66,20 +70,7 @@ public:
      */
     std::pair<std::array<int, 4>, torch::Tensor> choose_move(const Board& board, Cell_state player);
 
-    /**
-     * @brief Executes random moves on the board for exploration
-     *network
-     * Updates the board state by making a specified number of random valid moves,
-     * alternating between players as appropriate.
-     *
-     * @param board Board state to modify
-     * @param player The current player making the first move
-     * @param random_move_number Number of random moves to execute
-     */
-    void random_move(Board& board, Cell_state player, int random_move_number);
-
 private:
-    std::shared_ptr<AlphaZModel> network;
     double exploration_factor;
     int number_iteration;
     LogLevel log_level;
@@ -89,8 +80,16 @@ private:
     float temperature;          // Temperature for move selection
     float dirichlet_alpha;      // Alpha parameter for Dirichlet noise
     float dirichlet_epsilon;    // Epsilon for Dirichlet noise mixing
+    std::shared_ptr<AlphaZModel> network;
     int max_depth;              // Maximum search depth
     bool tree_reuse;            // Whether to reuse search tree
+    torch::Device current_device = torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
+
+    float virtual_loss_value;
+    const int nn_batch_size;
+    const int num_workers;
+
+    std::unique_ptr<TensorPool> tensor_pool;
 
     /**
      * @brief Represents a node in the Monte Carlo Tree Search (MCTS) tree
@@ -99,6 +98,11 @@ private:
      * information and statistics accumulated during the search process.
      */
     struct Node {
+
+        float virtual_loss{0.0f};
+        std::atomic<int> virtual_visit_count{0};
+        std::atomic<bool> nn_evaluated{false};
+        std::condition_variable cv;
         /**
          * @brief Value estimate from the neural network evaluation
          */
@@ -204,9 +208,9 @@ private:
     std::vector<float> generate_dirichlet_noise(int num_moves, float alpha);
 
     /**
-     * @brief Performs Monte Carlo Tree Search guided by neural network
+     * @brief Performs Parallel Monte Carlo Tree Search guided by neural network
      *
-     * Executes the main MCTS loop for a specified number of iterations.
+     * Executes the main MCTS loop for a specified number of iterations with tree parallelization and batched inference.
      * Each iteration selects, expands, simulates (via NN), and backpropagates.
      * Logs statistics according to verbose mode level
      *
@@ -214,9 +218,8 @@ private:
      * @param mcts_iteration_counter Reference to iteration counter for logging
      * @param board Initial game state to search from
      */
-    void perform_mcts_iterations(const int number_iteration,
-                                  int& mcts_iteration_counter,
-                                  const Board& board);
+    void perform_mcts_iterations_parallel(const int number_iteration,
+                                          int& mcts_iteration_counter, const Board& board);
 
     /**
     * @brief Sample the next move based on visit counts and temperature.
@@ -231,7 +234,7 @@ private:
     * @return Pair containing the selected child node and a 1D policy tensor of size 
     *         (X * Y * DIR * TAR) for data collection.
     */
-    std::pair<std::shared_ptr<Mcts_agent::Node>, torch::Tensor> sample_child_and_get_policy(
+    std::pair<std::shared_ptr<Mcts_agent_parallel::Node>, torch::Tensor> sample_child_and_get_policy(
     const std::shared_ptr<Node>& parent_node) const;
 
     /**
@@ -248,37 +251,18 @@ private:
         const torch::Tensor& log_probs_tensor) const;
 
     /**
-     * @brief Select a leaf by moving the tree using PUCT Score
+     * @brief One worker function to select a leaf by moving the tree using PUCT Score and virtual loss
      *
      * Evaluates all children of the parent node and selects the one with the
-     * highest PUCT score, which balances exploitation (Q-value) and exploration
-     * (prior probability and visit counts). Updates the board state accordingly.
+     * highest PUCT score, which balances exploitation.
      *
      * @param parent_node Node where to start selection
      * @param board Current board state (will be modified with selected move)
      *
      * @return Pair of (selected child node, corresponding board state)
      */
-    std::pair<std::shared_ptr<Mcts_agent::Node>, Board> select_child_for_playout(
+        std::pair<std::shared_ptr<Node>, Board> select_with_virtual_loss(
         const std::shared_ptr<Node>& parent_node, Board board);
-
-    /**
-     * @brief Computes the PUCT score
-     *
-     * Calculates the PUCT score used in AlphaZero-style MCTS to balance
-     * exploitation (mean action value) and exploration (prior probability
-     * weighted by visit counts). Unvisited nodes return a high value to
-     * encourage exploration.
-     *
-     * Formula: Q(s,a) + c_puct * P(s,a) * sqrt(N(s)) / (1 + N(s,a))
-     *
-     * @param child_node Child node being evaluated
-     * @param parent_node Parent node providing context for visit count
-     *
-     * @return PUCT score for the child node
-     */
-    double calculate_puct_score(const std::shared_ptr<Node>& child_node,
-                                const std::shared_ptr<Node>& parent_node);
 
     /**
      * @brief Simulates random playout from a given node
@@ -297,17 +281,24 @@ private:
     float simulate_random_playout(const std::shared_ptr<Node>& node, Board board);
 
     /**
-     * @brief Backpropagates simulation results through the MCTS tree
+     * @brief One worker function to backpropagates simulation results through the MCTS tree and remove virtual loss
      *
-     * Updates visit counts and accumulated values from the given node up to
-     * the root. The value is propagated with sign flips at each level to
-     * maintain proper perspective for alternating players. Thread-safe via
+     * Updates virtual loss, visit counts and accumulated values from the given node up to
+     * the root. The value is propagated with sign flips at based on the current node parent. Thread-safe via
      * mutex locks.
      *
      * @param node Node at which to start backpropagation
      * @param value Outcome value to backpropagate (-1 to 1 scale)
      */
-    void backpropagate(std::shared_ptr<Node>& node, float value);
+     void backpropagate_remove_virtual_loss(
+            std::shared_ptr<Node>& node, float value);
+
+    
+    void expand_node_from_policy(
+            const std::shared_ptr<Node>& node,
+            const Board& board,
+            const torch::Tensor& policy,
+            float value);
 
 };
 

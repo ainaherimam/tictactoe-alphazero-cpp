@@ -36,6 +36,8 @@ set(SOURCES
     alphaz_model.cpp
     game_dataset.cpp
     minimax_agent.cpp
+    mcts_agent_parallel.cpp
+    tensor_pool.cpp
 )
 
 # ============================================================

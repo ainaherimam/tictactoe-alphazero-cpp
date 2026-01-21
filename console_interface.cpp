@@ -126,6 +126,31 @@ std::unique_ptr<Mcts_player> create_mcts_agent(
     return std::make_unique<Mcts_player>(exploration_constant, max_iteration,log_level, 0.0, 0.2, 0.15, best_model, -1, false);
     }
 
+std::unique_ptr<Mcts_player_parallel> create_mcts_agent_parallel(
+    const std::string& agent_prompt) {
+
+    torch::Device device(torch::kCUDA);
+    if (!torch::cuda::is_available()) device = torch::kCPU;
+    auto best_model  = AlphaZModel::load_model("checkpoint/best.pt");
+    best_model->to(device);
+    best_model->eval();
+
+    std::cout << "\nInitializing " << agent_prompt << ":\n";
+
+    int max_iteration = get_parameter_within_bounds(
+        "Max iteration number (at least 10) : ", 10, INT_MAX);
+
+    double exploration_constant = 1.41;
+
+    exploration_constant = get_parameter_within_bounds(
+        "Enter exploration constant (between 0.1 and 2): ", 0.1, 2.0);
+
+    LogLevel log_level = LogLevel::NONE;
+    log_level = static_cast<LogLevel>(get_parameter_within_bounds("Log Level (0:None  -- 5:Full)  : ", 0, 5));
+    return std::make_unique<Mcts_player_parallel>(exploration_constant, max_iteration, log_level, 0.0, 0.2, 0.15, best_model, -1, false, 1.0f, 2, 2);
+    }
+    
+
 void countdown(int seconds) {
     while (seconds > 0) {
         std::cout << "The agent will start thinking loudly in " << seconds
@@ -145,7 +170,7 @@ void start_match_against_robot() {
 
     int board_size = 9;
 
-    auto mcts_agent = create_mcts_agent("agent");
+    auto mcts_agent = create_mcts_agent_parallel("agent");
     auto human_player = std::make_unique<Human_player>();
 
     if (human_player_number == 1) {

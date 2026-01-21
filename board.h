@@ -120,6 +120,10 @@ public:
      */
     torch::Tensor to_tensor(Cell_state player) const;
 
+    void fill_tensor(torch::Tensor& tensor, Cell_state player) const;
+
+    void fill_mask(torch::Tensor& mask, Cell_state player) const;
+
     /**
      * @brief Adds the current board state to history
      */

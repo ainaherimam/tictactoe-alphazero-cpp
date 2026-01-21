@@ -103,6 +103,18 @@ double get_parameter_within_bounds<double>(const std::string& prompt,
 std::unique_ptr<Mcts_player> create_mcts_agent(const std::string& agent_prompt);
 
 /**
+ * @brief Creates a Monte Carlo Tree Search (MCTS) player with custom
+ * parameters.
+ * 
+ * This function prompts the user for various parameters to initialize the MCTS
+ * agent.
+ * 
+ * @param agent_prompt The string used to indicate the agent being initialized.
+ * @return A unique pointer to the MCTS agent.
+ */
+std::unique_ptr<Mcts_player_parallel> create_mcts_agent_parallel(const std::string& agent_prompt);
+
+/**
  * @brief A simple countdown function.
  * 
  * @param seconds The number of seconds to count down from.

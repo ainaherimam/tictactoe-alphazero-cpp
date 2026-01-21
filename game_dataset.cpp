@@ -78,7 +78,6 @@ void GameDataset::save(const std::string& path) const {
 }
 
 
-
 DatasetAnalysis GameDataset::analyze_dataset() const {
     DatasetAnalysis analysis;
     analysis.total_states = current_size;

@@ -4,10 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
-#include <stdexcept>
-#include <string>
 #include <vector>
-#include "iterator"
 
 
 Board::Board(int size)
@@ -98,6 +95,50 @@ torch::Tensor Board::to_tensor(Cell_state player) const {
     
     return stacked;
 }
+
+void Board::fill_tensor(torch::Tensor& tensor, Cell_state player) const {
+    auto accessor = tensor.accessor<float, 3>();
+    const float player_plane_value = (player == Cell_state::X) ? 0.0f : 1.0f;
+    
+    // Fill current board (planes 0-1)
+    for (int x = 0; x < 4; ++x) {
+        for (int y = 0; y < 4; ++y) {
+            Cell_state cell = board[x][y];
+            
+            if (cell == player) {
+                accessor[0][x][y] = 1.0f;
+            } else if (cell != Cell_state::Empty) {
+                accessor[1][x][y] = 1.0f;
+            }
+            
+            // Player indicator plane (plane 10)
+            accessor[10][x][y] = player_plane_value;
+        }
+    }
+}
+
+
+void Board::fill_mask(torch::Tensor& mask, Cell_state player) const {
+    auto accessor = mask.accessor<float, 1>();
+    auto valid_moves = get_valid_moves(player);
+    
+    // Pre-compute multipliers
+    const int Y_DIR_TAR = 4 * 1 * 1;
+    const int DIR_TAR = 1 * 1;
+    
+    for (const auto& move : valid_moves) {
+        int idx = move[0] * Y_DIR_TAR + 
+                  move[1] * DIR_TAR + 
+                  (move[2] - 1) * 4 + 
+                  (move[3] + 1);
+        
+        if (idx >= 0 && idx < 16) {
+            accessor[idx] = 1.0f;
+        }
+    }
+}
+
+
 
 Cell_state Board::check_winner() const {
     // Helper lambda to get the opponent (for Misère rules if kept)

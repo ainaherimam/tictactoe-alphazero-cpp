@@ -34,6 +34,7 @@ Mcts_agent::Mcts_agent(double exploration_factor,
       max_depth(max_depth),
       random_generator(std::random_device{}()),
       tree_reuse(tree_reuse) { 
+        //Turn the model to evaluation
         network->eval();
       }
 
@@ -386,23 +387,4 @@ void Mcts_agent::backpropagate(std::shared_ptr<Node>& node, float value) {
         
         current_node = current_node->parent_node;
     }
-}
-
-std::shared_ptr<Mcts_agent::Node> Mcts_agent::select_best_child(std::shared_ptr<Node>& node) {
-    double max_win_ratio = -1.;
-    std::shared_ptr<Node> best_child;
-
-    for (const auto& child : node->child_nodes) {
-        double win_ratio = static_cast<double>(child->visit_count) / static_cast<double>(node->visit_count);
-
-        if (win_ratio > max_win_ratio) {
-            max_win_ratio = win_ratio;
-            best_child = child;
-        }
-    }
-    if (!best_child) {
-        throw std::runtime_error(
-            "Statistics are not enough to determine a move. The AI had insufficient time for the given board size.");
-    }
-    return best_child;
 }

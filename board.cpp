@@ -112,7 +112,7 @@ void Board::fill_tensor(torch::Tensor& tensor, Cell_state player) const {
             }
             
             // Player indicator plane (plane 10)
-            accessor[10][x][y] = player_plane_value;
+            accessor[2][x][y] = player_plane_value;
         }
     }
 }

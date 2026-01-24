@@ -41,7 +41,6 @@ Mcts_agent_parallel::Mcts_agent_parallel(double exploration_factor,
       num_workers(num_workers),
       nn_batch_size(nn_batch_size) {
 
-        torch::Device device= torch::cuda::is_available() ? torch::kCUDA : torch::kCPU;
         torch::Device device_cpu =  torch::kCPU;
         const int pool_size = 64;
         tensor_pool = std::make_unique<TensorPool>(device_cpu, pool_size);
@@ -139,14 +138,20 @@ float Mcts_agent_parallel::initiate_and_run_nn(const std::shared_ptr<Node>& node
     Cell_state actual_player = node->player;
 
     auto [input, legal_mask] = tensor_pool->acquire();
-    
+        
     board.fill_tensor(input, current_player);
     board.fill_mask(legal_mask, current_player);
-    
-    input = input.unsqueeze(0);
-    legal_mask = legal_mask.unsqueeze(0);
-    auto [policy, value] = network->predict(input, legal_mask);
+
+    // Create batch tensors with unsqueezed dimension
+    torch::Tensor batched_input = input.unsqueeze(0);
+    torch::Tensor batched_legal_mask = legal_mask.unsqueeze(0);
+
+    // Release pooled tensors immediately
     tensor_pool->release(input, legal_mask);
+
+// Use batched_input and batched_legal_mask for inference
+    auto [policy, value] = network->predict(input, legal_mask);
+
 
     std::vector<std::pair<std::array<int, 4>, float>> move_with_logit = get_moves_with_probs(policy);
     
@@ -506,30 +511,41 @@ void Mcts_agent_parallel::perform_mcts_iterations_parallel(
             
             torch::NoGradGuard no_grad;
 
-            // BATCH NN INFERENCE
-            std::vector<torch::Tensor> inputs;
-            std::vector<torch::Tensor> masks;
-            inputs.reserve(batch.size());
-            masks.reserve(batch.size());
-            
-            for (auto& item : batch) {
-                    auto [board_tensor, mask_tensor] = tensor_pool->acquire();
-                    
-                    // Fill directly into pre-allocated GPU tensors
-                    item.board_state.fill_tensor(board_tensor, item.node->player);
-                    item.board_state.fill_mask(mask_tensor, item.node->player);
-                    
-                    inputs.push_back(board_tensor);
-                    masks.push_back(mask_tensor);
-                }
-            
-            
-            torch::Tensor batched_input = torch::stack(inputs).to(current_device);
-            torch::Tensor batched_masks = torch::stack(masks).to(current_device);
+                        int batch_size = batch.size();
+
+            // Get a sample tensor to determine dimensions
+            auto [sample_board, sample_mask] = tensor_pool->acquire();
+            auto board_shape = sample_board.sizes();
+            auto mask_shape = sample_mask.sizes();
+            tensor_pool->release(sample_board, sample_mask);
+
+            // Pre-allocate batch tensors directly on target device
+            torch::Tensor batched_input = torch::empty(
+                {batch_size, board_shape[0], board_shape[1], board_shape[2]}, 
+                torch::TensorOptions().dtype(torch::kFloat32).device(current_device));
+            torch::Tensor batched_masks = torch::empty(
+                {batch_size, mask_shape[0]}, 
+                torch::TensorOptions().dtype(torch::kFloat32).device(current_device));
+
+            // Fill batch using pooled tensors as temporary buffers
+            for (int i = 0; i < batch_size; ++i) {
+                auto [board_tensor, mask_tensor] = tensor_pool->acquire();
+                
+                // Fill directly into pre-allocated GPU tensors
+                batch[i].board_state.fill_tensor(board_tensor, batch[i].node->player);
+                batch[i].board_state.fill_mask(mask_tensor, batch[i].node->player);
+                
+                // Copy into batch
+                batched_input[i].copy_(board_tensor);
+                batched_masks[i].copy_(mask_tensor);
+                
+                // Release immediately - no aliasing
+                tensor_pool->release(board_tensor, mask_tensor);
+            }
 
             // Predict
             auto [policies, values] = network->predict(batched_input, batched_masks);
-                
+                            
             // Expand nodes and signal completion
             for (size_t i = 0; i < batch.size(); i++) {
                 auto& item = batch[i];
@@ -545,10 +561,6 @@ void Mcts_agent_parallel::perform_mcts_iterations_parallel(
                     item.node->nn_evaluated = true;
                 }
                 item.node->cv.notify_all();
-            }
-
-            for (size_t i = 0; i < batch.size(); i++) {
-                tensor_pool->release(inputs[i], masks[i]);
             }
         }
     });

@@ -9,6 +9,7 @@
 #include "game.h"
 #include "alphaz_model.h"
 #include "game_dataset.h"
+#include "selfplay_manager.h"
 
 /**
  * @brief Checks if the input string is an integer.

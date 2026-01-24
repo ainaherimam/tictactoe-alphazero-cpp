@@ -16,12 +16,16 @@ Game::Game(int board_size, std::unique_ptr<Player> player1,
     : board(board_size), current_player_index(0), dataset_(dataset), evaluation(evaluation) {
   players[0] = std::move(player1);
   players[1] = std::move(player_2);
+
+  result_z.clear();
 }
 
 Cell_state Game::play() {
 
     int move_counter = 0;
     int max_move = 70;
+
+    result_z.clear();
 
     Cell_state current_player =
             current_player_index == 0 ? Cell_state::X : Cell_state::O;
@@ -40,7 +44,7 @@ Cell_state Game::play() {
             current_player_index == 0 ? Cell_state::X : Cell_state::O;
         
         if (!evaluation){
-            auto* mcts = dynamic_cast<Mcts_player*>(players[current_player_index].get());
+            auto* mcts = dynamic_cast<Mcts_player_selfplay*>(players[current_player_index].get());
             if (move_counter < 6) {
                 mcts->set_temperature(1.0);
             } else {

@@ -7,7 +7,9 @@
 #include "board.h"
 #include "logger.h"
 #include "alphaz_model.h"
+#include "inference_queue.h"
 #include "mcts_agent_parallel.h"
+#include "mcts_agent_selfplay.h"
 #include <torch/torch.h>
 
 /**
@@ -261,3 +263,76 @@ class Minimax_player : public Player {
 };
 
 #endif
+
+
+// .h file
+class Mcts_player_selfplay : public Player {
+ public:
+  /**
+   * @brief Mcts_player_selfplay constructor initializes MCTS parameters for self-play
+   *
+   * @param exploration_factor Exploration factor (PUCT constant)
+   * @param number_iteration Iteration number for MCTS simulations
+   * @param log_level Log Level for debugging output
+   * @param temperature Temperature parameter for action selection 
+   * @param dirichlet_alpha Alpha parameter for Dirichlet noise 
+   * @param dirichlet_epsilon Epsilon for mixing Dirichlet noise with policy
+   * @param inference_queue Pointer to shared inference queue for batched evaluation
+   * @param max_depth Maximum search depth for MCTS
+   * @param tree_reuse Whether to reuse the search tree between moves
+   */
+  Mcts_player_selfplay(double exploration_factor,
+                       int number_iteration,
+                       LogLevel log_level = LogLevel::NONE,
+                       float temperature = 0.0f,
+                       float dirichlet_alpha = 0.3f,
+                       float dirichlet_epsilon = 0.25f,
+                       InferenceQueue* inference_queue = nullptr,
+                       int max_depth = 100,
+                       bool tree_reuse = false);
+  
+  /**
+   * @brief Implementation of the choose_move function for the Mcts_player_selfplay class
+   *
+   * @param board The current state of the game board
+   * @param player The current player 
+   *
+   * @return The chosen move as an array of integers and policy tensor for data collection
+   */
+  std::pair<std::array<int, 4>, torch::Tensor> choose_move(
+      const Board& board,
+      Cell_state player) override;
+  
+  /**
+   * @brief Getter for verbose level private member of the Mcts_player_selfplay class
+   *
+   * @return The verbose level
+   */
+  LogLevel get_verbose_level() const;
+  
+  void set_temperature(float temp);
+  float get_temperature() const;
+  
+  void set_exploration_factor(double factor);
+  double get_exploration_factor() const;
+  
+  void set_number_iteration(int iterations);
+  int get_number_iteration() const;
+  
+  void set_dirichlet_alpha(float alpha);
+  float get_dirichlet_alpha() const;
+  
+  void set_dirichlet_epsilon(float epsilon);
+  float get_dirichlet_epsilon() const;
+  
+ private:
+  double exploration_factor;
+  int number_iteration;
+  LogLevel log_level;
+  float temperature;
+  float dirichlet_alpha;
+  float dirichlet_epsilon;
+  InferenceQueue* inference_queue;  
+  int max_depth;
+  bool tree_reuse;
+};

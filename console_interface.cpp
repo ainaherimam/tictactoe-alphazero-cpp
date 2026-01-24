@@ -4,7 +4,7 @@
 #include <thread>
 #include <climits>
 #include <filesystem>
-
+#include "selfplay_manager.h"
 #include "board.h"
 #include "game_dataset.h"
 #include "alphaz_model.h"
@@ -200,105 +200,177 @@ void selfplay() {
     torch::Device device(torch::kCUDA);
     if (!torch::cuda::is_available()) device = torch::kCPU;
     
-    int replay_buffer_size = 7500;
-    GameDataset dataset(replay_buffer_size);
+    // ========================================
+    // CONFIGURATION PARAMETERS
+    // ========================================
     
-    // THE MODEL USED FOR INFERENCE
-    std::string best_model_path = "checkpoint/best.pt";
-    auto best_model = AlphaZModel::load_model(best_model_path);
+    // Board configuration
+    const int BOARD_SIZE = 9;
+    const int INPUT_CHANNELS = 3;
+    const int NUM_MOVES = 81;
+    
+    // Network architecture
+    const int CONV_CHANNELS = 64;
+    const int NUM_RES_BLOCKS = 3;
+    
+    // Dataset configuration
+    const int REPLAY_BUFFER_SIZE = 7500;
+    GameDataset dataset(REPLAY_BUFFER_SIZE);
+    
+    // Self-play configuration
+    const int NUM_PARALLEL_GAMES = 12;
+    const int GAMES_PER_WORKER = 17;  // 12 * 17 ≈ 200 games per iteration
+    const int BATCH_SIZE = 12;
+    const int MCTS_SIMULATIONS = 100;
+    
+    // MCTS parameters
+    const double EXPLORATION_FACTOR = 0.6;
+    const float DIRICHLET_ALPHA = 0.2f;
+    const float DIRICHLET_EPSILON = 0.15f;
+    
+    // Training configuration
+    const int NUM_ITERATIONS = 30;
+    const int TRAINING_STEPS = 150;
+    const int TRAINING_BATCH_SIZE = 128;
+    const float LEARNING_RATE = 1e-3f;
+    
+    // Checkpointing
+    const int CHECKPOINT_INTERVAL = 3;
+    const int EVALUATION_INTERVAL = 3;
+    const std::string CHECKPOINT_DIR = "checkpoint";
+    const std::string BEST_MODEL_PATH = "checkpoint/best.pt";
+    
+    std::cout << "🌱 Starting AlphaZero self-play training...\n";
+    std::cout << "\n[Configuration]" << std::endl;
+    std::cout << "Board size: " << BOARD_SIZE << "x" << BOARD_SIZE << std::endl;
+    std::cout << "Parallel games: " << NUM_PARALLEL_GAMES << std::endl;
+    std::cout << "Games per worker: " << GAMES_PER_WORKER << std::endl;
+    std::cout << "Total games per iteration: " << (NUM_PARALLEL_GAMES * GAMES_PER_WORKER) << std::endl;
+    std::cout << "Training iterations: " << NUM_ITERATIONS << std::endl;
+    
+    // ========================================
+    // LOAD BEST MODEL
+    // ========================================
+    
+    auto best_model = AlphaZModel::load_model(BEST_MODEL_PATH);
     best_model->to(device);
     best_model->eval();
     
-    // HYPERPARAMETERS
-    double exploration_factor = 0.6;
-    int number_iteration = 500;
-    float temperature = 1.0; // Changed in the Game object to varies depending on the game loss.
-    float dirichlet_alpha = 0.2;
-    float dirichlet_epsilon = 0.15;
-    int max_depth = -1; // Still not implemented
-    bool tree_reuse = false; // Still not implemented
+    // ========================================
+    // INITIALIZE SELF-PLAY MANAGER
+    // ========================================
     
-    // TRAINING HYPERPARAMETERS
-    int num_iterations = 30;
-    int games_per_iteration = 200;
-    int training_steps = 150;
-    int batch_size = 128;
-    double learning_rate = 1e-3;
+    SelfPlayManager selfplay_manager;
     
-    std::cout << "🌱 Starting AlphaZero self-play training...\n";
+    // ========================================
+    // MAIN TRAINING LOOP
+    // ========================================
     
     int total_games = 0;
     
-    for (int iteration = 1; iteration <= num_iterations; ++iteration) {
+    for (int iteration = 1; iteration <= NUM_ITERATIONS; ++iteration) {
         std::cout << "\n========================================\n";
-        std::cout << "🔁 ITERATION " << iteration << "/" << num_iterations << "\n";
+        std::cout << "🔁 ITERATION " << iteration << "/" << NUM_ITERATIONS << "\n";
         std::cout << "========================================\n\n";
         
-        // SELF-PLAY
-        std::cout << "🎮 Playing " << games_per_iteration << " self-play games...\n";
+        // ========================================
+        // PHASE 1: SELF-PLAY DATA GENERATION
+        // ========================================
         
-        for (int game_num = 0; game_num < games_per_iteration; ++game_num) {
-            Game game(
-                9,
-                std::make_unique<Mcts_player>(
-                    exploration_factor, number_iteration, LogLevel::NONE, 
-                    temperature, dirichlet_alpha, dirichlet_epsilon, 
-                    best_model, max_depth, tree_reuse
-                ),
-                std::make_unique<Mcts_player>(
-                    exploration_factor, number_iteration, LogLevel::NONE, 
-                    temperature, dirichlet_alpha, dirichlet_epsilon, 
-                    best_model, max_depth, tree_reuse
-                ),
-                dataset,
-                false
-            );
-            
-            Cell_state winner = game.play();
-            total_games++;
-            
-            if ((game_num + 1) % 10 == 0 || (game_num + 1) == games_per_iteration) {
-                std::cout << "  Games: " << (game_num + 1) << "/" << games_per_iteration
-                          << " | Buffer: " << dataset.current_size << "/" << replay_buffer_size;
-            }
-        }
+        std::cout << "🎮 Generating training data through parallel self-play...\n";
+        
+        size_t dataset_size_before = dataset.actual_size();
+        
+        selfplay_manager.generate_training_data(
+            NUM_PARALLEL_GAMES,
+            GAMES_PER_WORKER,
+            best_model,
+            dataset,
+            BATCH_SIZE,
+            MCTS_SIMULATIONS,
+            BOARD_SIZE,
+            EXPLORATION_FACTOR,
+            DIRICHLET_ALPHA,
+            DIRICHLET_EPSILON
+        );
+        
+        size_t new_positions = dataset.actual_size() - dataset_size_before;
+        int games_played = NUM_PARALLEL_GAMES * GAMES_PER_WORKER;
+        total_games += games_played;
         
         std::cout << "✅ Total games played: " << total_games << "\n";
-        std::cout << "📊 Replay buffer size: " << dataset.current_size << "/" << replay_buffer_size << "\n\n";
+        std::cout << "📊 New positions: " << new_positions << "\n";
+        std::cout << "📊 Replay buffer size: " << dataset.actual_size() 
+                  << "/" << REPLAY_BUFFER_SIZE << "\n\n";
         
-        // TRAINING
-        auto candidate_model = AlphaZModel::load_model(best_model_path);
-        candidate_model->to(device);
-
-        std::cout << "🎯 Training network for " << training_steps << " steps...\n";
-
-        train(candidate_model, dataset, batch_size, training_steps, learning_rate, device, 5, false);
-
-        
-
-        // SAVE CHECKPOINT
-        std::string checkpoint_path = "checkpoint/iter_" + std::to_string(iteration) + ".pt";
-        candidate_model->save_model(checkpoint_path);
-        
-
-        // EVALUATION
-        std::cout << "⚔️  Evaluating new model vs current best...\n";
-        if (iteration % 3==0){
-          evaluate(best_model_path, checkpoint_path);
+        // Skip training if not enough data
+        if (dataset.actual_size() < TRAINING_BATCH_SIZE) {
+            std::cout << "⚠️  Not enough data for training yet (need at least " 
+                      << TRAINING_BATCH_SIZE << " positions)\n";
+            continue;
         }
         
-        //clean();
+        // ========================================
+        // PHASE 2: NEURAL NETWORK TRAINING
+        // ========================================
+        
+        std::cout << "🎯 Training network for " << TRAINING_STEPS << " steps...\n";
+        
+        auto candidate_model = AlphaZModel::load_model(BEST_MODEL_PATH);
+        candidate_model->to(device);
+        
+        train(
+            candidate_model,
+            dataset,
+            TRAINING_BATCH_SIZE,
+            TRAINING_STEPS,
+            LEARNING_RATE,
+            device,
+            5,
+            false
+        );
+        
+        // Set back to evaluation mode
+        candidate_model->eval();
+        
+        // ========================================
+        // PHASE 3: CHECKPOINTING
+        // ========================================
+        
+        std::string checkpoint_path = CHECKPOINT_DIR + "/iter_" + std::to_string(iteration) + ".pt";
+        candidate_model->save_model(checkpoint_path);
+        std::cout << "💾 Saved checkpoint: " << checkpoint_path << "\n";
+        
+        // ========================================
+        // PHASE 4: EVALUATION
+        // ========================================
+        
+        if (iteration % EVALUATION_INTERVAL == 0) {
+            std::cout << "\n⚔️  Evaluating new model vs current best...\n";
+            evaluate(BEST_MODEL_PATH, checkpoint_path);
+        }
+        
+        // ========================================
+        // SAVE DATASET PERIODICALLY
+        // ========================================
+        
+        if (iteration % CHECKPOINT_INTERVAL == 0) {
+            std::string dataset_path = "dataset" + std::to_string(iteration);
+            dataset.save(dataset_path);
+            std::cout << "💾 Saved dataset: " << dataset_path << "_*.pt\n";
+        }
         
         std::cout << "\n✅ Iteration " << iteration << " complete!\n";
-        //dataset.print_analysis();
-
-        if (iteration % 3 ==0){
-          dataset.save("dataset"+std::to_string(iteration));
-        }
     }
-    dataset.save("checkpoint/dataset");
+    
+    // ========================================
+    // SAVE FINAL DATASET
+    // ========================================
+    
+    dataset.save(CHECKPOINT_DIR + "/dataset");
     std::cout << "\n🎉 Training complete! Total games played: " << total_games << "\n";
 }
+
 
 void init() {
     torch::manual_seed(0);
@@ -340,168 +412,179 @@ int clean() {
     return 0;
 }
 
-void evaluate(std::string best_model_path, std::string candidate_model_path){
-
-  std::string best_filename = best_model_path.substr(best_model_path.find_last_of("/\\") + 1);
-  std::string candidate_filename = candidate_model_path.substr(candidate_model_path.find_last_of("/\\") + 1);
-  
-  // std::cout << "Testing: " << best_filename << " VS " << candidate_filename << std::endl;
-  
-  GameDataset dataset(1000);
-  torch::manual_seed(0);
-  torch::Device device(torch::kCUDA);
-  if (!torch::cuda::is_available()) device = torch::kCPU;
-
-  // THE MODEL USED FOR INFERENCE
-  auto best_model = AlphaZModel::load_model(best_model_path);
-  best_model->to(device);
-  best_model->eval();
-
-  auto candidate_model  = AlphaZModel::load_model(candidate_model_path);
-  candidate_model->to(device);
-  candidate_model->eval();
-
-  // HYPERPARAMETERS
-  double exploration_factor = 1.41;
-  int number_iteration = 100;
-  float temperature = 0.0;  // Deterministic for evaluation
-  float dirichlet_alpha = 0.3;
-  float dirichlet_epsilon = 0.0;  // No exploration noise during evaluation
-  int max_depth = -1;
-  bool tree_reuse = false;
-
-  int game_counter = 0;
-  int best_win = 0;
-  int candidate_win = 0;
-  int draw = 0;
-  int game_number = 400;  // AlphaZero suggest 400 games for statistical significance.
-
-  std::cout << "\n=============================\n";
-  std::cout << "🔁 ALPHAZERO EVALUATION \n";
-  std::cout << "=============================\n\n";
-
-  std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Best as X, Candidate as O\n\n";
-
-  while (game_counter < game_number/2)
-  {
-      if ((game_counter + 1) % 20 == 0 || game_counter == 0) {
-          std::cout << "Game " << game_counter + 1 << "/" << game_number/2 
-                    << " | Best: " << best_win 
-                    << " Candidate: " << candidate_win 
-                    << " Draws: " << draw << "\n";
-      }
-
-      Game game(9,
-                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
-                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
-                                              best_model, max_depth, tree_reuse),
-                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
-                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
-                                              candidate_model, max_depth, tree_reuse),
-                dataset,
-                true);
-
-      Cell_state winner = game.play();
-      if (winner == Cell_state::X){
-        best_win++;
-      }
-      else if (winner == Cell_state::O){
-        candidate_win++;
-      }
-      else{
-        draw++;
-      }
-
-      game_counter++;
-  }
-
-
-  std::cout << "▶ Phase 2: Playing " << game_number / 2 << "games - Candidate as X, Best as O\n\n";
-
-  while (game_counter < game_number)
-  {
-      if ((game_counter - game_number/2 + 1) % 20 == 0 || game_counter == game_number/2) {
-          std::cout << "Game " << game_counter + 1 << "/" << game_number 
-                    << " | Best: " << best_win 
-                    << " Candidate: " << candidate_win 
-                    << " Draws: " << draw << "\n";
-      }
-
-      Game game(9,
-                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
-                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
-                                              candidate_model, max_depth, tree_reuse),
-                std::make_unique<Mcts_player>(exploration_factor, number_iteration, LogLevel::NONE, 
-                                              temperature, dirichlet_alpha, dirichlet_epsilon, 
-                                              best_model, max_depth, tree_reuse),
-                dataset,
-                true);
-
-      Cell_state winner = game.play();
-      if (winner == Cell_state::X){
-        candidate_win++;
-      }
-      else if (winner == Cell_state::O){
-        best_win++;
-      }
-      else{
-        draw++;
-      }
-
-      game_counter++;
-  }
-
-
-  //Scoring: win=1, draw=0.5, loss=0
-  float candidate_score = candidate_win + (draw * 0.5f);
-  float best_score = best_win + (draw * 0.5f);
-  
-  float candidate_winrate = (candidate_score / game_number) * 100.0f;
-  float best_winrate = (best_score / game_number) * 100.0f;
-  
-  std::cout << "\n=============================\n";
-  std::cout << "🏁 EVALUATION COMPLETE\n";
-  std::cout << "=============================\n";
-  std::cout << "Results:\n";
-  std::cout << "  Best model wins     : " << best_win << "/" <<game_number<<"\n";
-  std::cout << "  Candidate wins      : " << candidate_win << "/" <<game_number<<"\n";
-  std::cout << "  Draws               : " << draw << "/" <<game_number<<"\n";
-  
-  std::cout << std::fixed << std::setprecision(2);
-  std::cout << "Win Rates:\n";
-  std::cout << "  Best model          : " << best_winrate << "%\n";
-  std::cout << "  Candidate           : " << candidate_winrate << "%\n\n";
-  
-
-  const float REPLACEMENT_THRESHOLD = 55.0f;
-  bool should_replace = (candidate_winrate >= REPLACEMENT_THRESHOLD);
-  
-  if (should_replace) {
-      std::cout << "✅ Candidate achieves >= " << REPLACEMENT_THRESHOLD << "% win rate. Promoting to best model...\n\n";
-      
-      // Archive old best model
-      fs::path oldFile = best_model_path;
-      std::string baseName = "best-old-";
-      std::string extension = ".pt";
-      int counter = 1;
-      fs::path newFile;
-      
-      do {
-          newFile = oldFile.parent_path() / (baseName + std::to_string(counter) + extension);
-          counter++;
-      } while (fs::exists(newFile));
-      
-      try {
-          fs::rename(oldFile, newFile);
-          fs::copy_file(candidate_model_path, best_model_path);
-          std::cout << "💾 Best model updated: " << best_model_path << "\n";
-      } catch (const std::exception &e) {
-          std::cerr << "❌ Error updating best model: " << e.what() << '\n';
-      }
-  } else {
-      std::cout << "❌ Candidate achieves < " << REPLACEMENT_THRESHOLD << "%. Current best model kept.\n";
-  }
+void evaluate(std::string best_model_path, std::string candidate_model_path) {
     
+    std::string best_filename = best_model_path.substr(best_model_path.find_last_of("/\\") + 1);
+    std::string candidate_filename = candidate_model_path.substr(candidate_model_path.find_last_of("/\\") + 1);
+    
+    // ========================================
+    // CONFIGURATION PARAMETERS
+    // ========================================
+    
+    // Board configuration
+    const int BOARD_SIZE = 9;
+    
+    // Self-play configuration
+    const int NUM_PARALLEL_GAMES = 24;
+    const int GAMES_PER_PHASE = 200;  // 200 games per phase
+    const int BATCH_SIZE = 12;
+    const int MCTS_SIMULATIONS = 100;
+    
+    // MCTS parameters (deterministic for evaluation)
+    const double EXPLORATION_FACTOR = 1.41;
+    const float DIRICHLET_ALPHA = 0.3f;
+    const float DIRICHLET_EPSILON = 0.0f;  // No exploration noise during evaluation
+    
+    // Evaluation configuration
+    const float REPLACEMENT_THRESHOLD = 55.0f;
+    
+    // Calculate games per worker
+    int games_per_worker = (GAMES_PER_PHASE + NUM_PARALLEL_GAMES - 1) / NUM_PARALLEL_GAMES;
+    
+    // ========================================
+    // DEVICE SETUP
+    // ========================================
+    
+    torch::manual_seed(0);
+    torch::Device device(torch::kCUDA);
+    if (!torch::cuda::is_available()) device = torch::kCPU;
+    
+    // ========================================
+    // LOAD MODELS
+    // ========================================
+    
+    auto best_model = AlphaZModel::load_model(best_model_path);
+    best_model->to(device);
+    best_model->eval();
+    
+    auto candidate_model = AlphaZModel::load_model(candidate_model_path);
+    candidate_model->to(device);
+    candidate_model->eval();
+    
+    // ========================================
+    // INITIALIZE MANAGER
+    // ========================================
+    
+    SelfPlayManager selfplay_manager;
+    
+    std::cout << "\n=============================\n";
+    std::cout << "🔁 ALPHAZERO EVALUATION \n";
+    std::cout << "=============================\n\n";
+    
+    // ========================================
+    // PHASE 1: BEST AS X, CANDIDATE AS O
+    // ========================================
+    
+    std::cout << "▶ Phase 1: Playing " << GAMES_PER_PHASE << " games - Best as X, Candidate as O\n\n";
+    
+    EvaluationResults phase1_results = selfplay_manager.generate_evaluation_games(
+        NUM_PARALLEL_GAMES,
+        games_per_worker,
+        best_model,
+        candidate_model,
+        BATCH_SIZE,
+        MCTS_SIMULATIONS,
+        BOARD_SIZE,
+        EXPLORATION_FACTOR,
+        DIRICHLET_ALPHA,
+        DIRICHLET_EPSILON
+    );
+    
+    int best_wins = phase1_results.model1_wins;
+    int candidate_wins = phase1_results.model2_wins;
+    int draws = phase1_results.draws;
+    
+    std::cout << "Phase 1 Results: Best: " << best_wins 
+              << " Candidate: " << candidate_wins 
+              << " Draws: " << draws << "\n\n";
+    
+    // ========================================
+    // PHASE 2: CANDIDATE AS X, BEST AS O
+    // ========================================
+    
+    std::cout << "▶ Phase 2: Playing " << GAMES_PER_PHASE << " games - Candidate as X, Best as O\n\n";
+    
+    EvaluationResults phase2_results = selfplay_manager.generate_evaluation_games(
+        NUM_PARALLEL_GAMES,
+        games_per_worker,
+        candidate_model,
+        best_model,
+        BATCH_SIZE,
+        MCTS_SIMULATIONS,
+        BOARD_SIZE,
+        EXPLORATION_FACTOR,
+        DIRICHLET_ALPHA,
+        DIRICHLET_EPSILON
+    );
+    
+    // Accumulate results (candidate is player1 in phase 2, so wins are swapped)
+    candidate_wins += phase2_results.model1_wins;
+    best_wins += phase2_results.model2_wins;
+    draws += phase2_results.draws;
+    
+    int total_games = phase1_results.total_games + phase2_results.total_games;
+    
+    std::cout << "Phase 2 Results: Best: " << phase2_results.model2_wins 
+              << " Candidate: " << phase2_results.model1_wins 
+              << " Draws: " << phase2_results.draws << "\n\n";
+    
+    // ========================================
+    // CALCULATE FINAL RESULTS
+    // ========================================
+    
+    // Scoring: win=1, draw=0.5, loss=0
+    float candidate_score = candidate_wins + (draws * 0.5f);
+    float best_score = best_wins + (draws * 0.5f);
+    
+    float candidate_winrate = (candidate_score / total_games) * 100.0f;
+    float best_winrate = (best_score / total_games) * 100.0f;
+    
+    std::cout << "\n=============================\n";
+    std::cout << "🏁 EVALUATION COMPLETE\n";
+    std::cout << "=============================\n";
+    std::cout << "Results:\n";
+    std::cout << "  Best model wins     : " << best_wins << "/" << total_games << "\n";
+    std::cout << "  Candidate wins      : " << candidate_wins << "/" << total_games << "\n";
+    std::cout << "  Draws               : " << draws << "/" << total_games << "\n";
+    
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Win Rates:\n";
+    std::cout << "  Best model          : " << best_winrate << "%\n";
+    std::cout << "  Candidate           : " << candidate_winrate << "%\n\n";
+    
+    // ========================================
+    // MODEL REPLACEMENT DECISION
+    // ========================================
+    
+    bool should_replace = (candidate_winrate >= REPLACEMENT_THRESHOLD);
+    
+    if (should_replace) {
+        std::cout << "✅ Candidate achieves >= " << REPLACEMENT_THRESHOLD 
+                  << "% win rate. Promoting to best model...\n\n";
+        
+        // Archive old best model
+        fs::path oldFile = best_model_path;
+        std::string baseName = "best-old-";
+        std::string extension = ".pt";
+        int counter = 1;
+        fs::path newFile;
+        
+        do {
+            newFile = oldFile.parent_path() / (baseName + std::to_string(counter) + extension);
+            counter++;
+        } while (fs::exists(newFile));
+        
+        try {
+            fs::rename(oldFile, newFile);
+            fs::copy_file(candidate_model_path, best_model_path);
+            std::cout << "💾 Best model updated: " << best_model_path << "\n";
+        } catch (const std::exception &e) {
+            std::cerr << "❌ Error updating best model: " << e.what() << '\n';
+        }
+    } else {
+        std::cout << "❌ Candidate achieves < " << REPLACEMENT_THRESHOLD 
+                  << "%. Current best model kept.\n";
+    }
 }
 
 void evaluate_vs_minimax(){

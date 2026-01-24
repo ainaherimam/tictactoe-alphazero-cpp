@@ -23,7 +23,8 @@ Mcts_agent_selfplay::Mcts_agent_selfplay(double exploration_factor,
                          float dirichlet_epsilon,
                          InferenceQueue* inference_queue,
                          int max_depth,
-                         bool tree_reuse)
+                         bool tree_reuse,
+                         ModelID model_id)
     : exploration_factor(exploration_factor),
       number_iteration(number_iteration),
       logger(Logger::instance(log_level)),
@@ -33,7 +34,8 @@ Mcts_agent_selfplay::Mcts_agent_selfplay(double exploration_factor,
       inference_queue(inference_queue),
       max_depth(max_depth),
       random_generator(std::random_device{}()),
-      tree_reuse(tree_reuse) {
+      tree_reuse(tree_reuse),
+      model_id(model_id) {
       }
 
 Mcts_agent_selfplay::Node::Node(Cell_state player, std::array<int, 4> move, float prior_proba, float value_from_nn,
@@ -113,7 +115,7 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
     torch::Tensor input = board.to_tensor(current_player);
     torch::Tensor legal_mask = board.get_legal_mask(current_player);
     
-    auto [policy, value] = inference_queue->evaluate_and_wait(input, legal_mask);
+    auto [policy, value] = inference_queue->evaluate_and_wait(input, legal_mask, model_id);
 
     std::vector<std::pair<std::array<int, 4>, float>> move_with_logit = get_moves_with_probs(policy);
     

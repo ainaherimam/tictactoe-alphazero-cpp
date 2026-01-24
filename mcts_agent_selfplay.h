@@ -36,6 +36,7 @@ public:
      * @param network Neural network model for policy/value evaluation (default: nullptr)
      * @param max_depth Maximum search depth for MCTS (default: -1, unlimited)
      * @param tree_reuse Whether to reuse the search tree between moves (default: false)
+     * @param model_id Indicator for the model to use for inference
     */
     Mcts_agent_selfplay(double exploration_factor,
               int number_iteration,
@@ -45,7 +46,8 @@ public:
               float dirichlet_epsilon = 0.25f,
               InferenceQueue* inference_queue = nullptr,
               int max_depth = -1,
-              bool tree_reuse = false);
+              bool tree_reuse = false,
+              ModelID model_id = ModelID::MODEL_1);
 
     /**
      * @brief Selects the best move using Monte Carlo Tree Search (MCTS)
@@ -91,6 +93,7 @@ private:
     float dirichlet_epsilon;    // Epsilon for Dirichlet noise mixing
     int max_depth;              // Maximum search depth
     bool tree_reuse;            // Whether to reuse search tree
+    ModelID model_id;
 
     /**
      * @brief Represents a node in the Monte Carlo Tree Search (MCTS) tree

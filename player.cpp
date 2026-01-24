@@ -363,7 +363,8 @@ Mcts_player_selfplay::Mcts_player_selfplay(double exploration_factor,
                                            float dirichlet_epsilon,
                                            InferenceQueue* inference_queue,
                                            int max_depth,
-                                           bool tree_reuse)
+                                           bool tree_reuse,
+                                           ModelID model_id)
     : exploration_factor(exploration_factor),
       number_iteration(number_iteration),
       log_level(log_level),
@@ -372,7 +373,8 @@ Mcts_player_selfplay::Mcts_player_selfplay(double exploration_factor,
       dirichlet_epsilon(dirichlet_epsilon),
       inference_queue(inference_queue),
       max_depth(max_depth),
-      tree_reuse(tree_reuse) {
+      tree_reuse(tree_reuse),
+      model_id(model_id) {
   // Parameter validation
   if (exploration_factor < 0.0) {
     throw std::invalid_argument("exploration_factor must be non-negative");
@@ -402,7 +404,8 @@ std::pair<std::array<int, 4>, torch::Tensor> Mcts_player_selfplay::choose_move(
                             dirichlet_epsilon,
                             inference_queue,
                             max_depth,
-                            tree_reuse);
+                            tree_reuse,
+                            model_id);
   return agent.choose_move(board, player);
 }
 

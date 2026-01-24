@@ -170,7 +170,7 @@ void start_match_against_robot() {
 
     int board_size = 9;
 
-    auto mcts_agent = create_mcts_agent_parallel("agent");
+    auto mcts_agent = create_mcts_agent("agent");
     auto human_player = std::make_unique<Human_player>();
 
     if (human_player_number == 1) {
@@ -425,7 +425,7 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     const int BOARD_SIZE = 9;
     
     // Self-play configuration
-    const int NUM_PARALLEL_GAMES = 24;
+    const int NUM_PARALLEL_GAMES = 12;
     const int GAMES_PER_PHASE = 200;  // 200 games per phase
     const int BATCH_SIZE = 12;
     const int MCTS_SIMULATIONS = 100;

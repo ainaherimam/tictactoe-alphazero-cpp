@@ -7,10 +7,17 @@
 #include <chrono>
 #include <exception>
 
-// Forward declaration of inference_worker
+// Forward declarations
 void inference_worker(
     InferenceQueue& queue,
     std::shared_ptr<AlphaZModel> network,
+    int batch_size,
+    std::atomic<bool>& stop_flag);
+
+void dual_inference_worker(
+    InferenceQueue& queue,
+    std::shared_ptr<AlphaZModel> model1,
+    std::shared_ptr<AlphaZModel> model2,
     int batch_size,
     std::atomic<bool>& stop_flag);
 
@@ -40,25 +47,17 @@ void SelfPlayManager::generate_training_data(
     std::cout << "[SelfPlay] dirichlet_epsilon  = " << dirichlet_epsilon << "\n";
     std::cout << "==============================================\n" << std::flush;
     
-    // CRITICAL FIX: Validate network pointer
     if (!network) {
         throw std::runtime_error("[SelfPlay] ERROR: network is nullptr!");
     }
     
     auto start_time = std::chrono::steady_clock::now();
     
-    // CRITICAL FIX: Create inference queue on heap to avoid potential stack issues
-    std::cout << "[SelfPlay] Creating inference queue..." << std::flush;
     InferenceQueue inference_queue;
-    std::cout << " done\n" << std::flush;
-    
-    // CRITICAL FIX: Initialize atomics properly
-    std::cout << "[SelfPlay] Atomic counters initialized\n" << std::flush;
     std::atomic<int> games_completed{0};
     std::atomic<bool> stop_inference{false};
     
-    // CRITICAL FIX: Launch inference thread with exception handling
-    std::cout << "[SelfPlay] Launching inference thread..." << std::flush;
+    // Launch single-model inference thread
     std::thread inference_thread;
     try {
         inference_thread = std::thread(
@@ -67,21 +66,17 @@ void SelfPlayManager::generate_training_data(
             network,
             batch_size,
             std::ref(stop_inference));
-        std::cout << " done\n" << std::flush;
     } catch (const std::exception& e) {
         std::cerr << "\n[SelfPlay] ERROR: Failed to launch inference thread: " 
                   << e.what() << std::endl;
         throw;
     }
     
-    // CRITICAL FIX: Launch game worker threads with exception handling
+    // Launch game worker threads
     std::vector<std::thread> game_threads;
     game_threads.reserve(num_parallel_games);
     
-    std::cout << "[SelfPlay] Launching " << num_parallel_games << " game worker threads...\n" << std::flush;
-    
     for (int i = 0; i < num_parallel_games; ++i) {
-        std::cout << "[SelfPlay] Launching game worker thread " << i << std::flush;
         try {
             game_threads.emplace_back(
                 &SelfPlayManager::game_worker,
@@ -96,12 +91,10 @@ void SelfPlayManager::generate_training_data(
                 dirichlet_alpha,
                 dirichlet_epsilon,
                 &games_completed);
-            std::cout << " - success\n" << std::flush;
         } catch (const std::exception& e) {
             std::cerr << "\n[SelfPlay] ERROR: Failed to launch game worker " << i 
                       << ": " << e.what() << std::endl;
             
-            // CRITICAL: Clean up already-launched threads
             stop_inference.store(true);
             inference_queue.shutdown();
             
@@ -119,98 +112,48 @@ void SelfPlayManager::generate_training_data(
         }
     }
     
-    std::cout << "[SelfPlay] All game worker threads launched\n" << std::flush;
-    
-    // CRITICAL FIX: Monitor progress with proper error handling
+    // Monitor progress
     int last_reported = 0;
     int total_games = num_parallel_games * games_per_worker;
     
-    std::cout << "[SelfPlay] Entering progress monitoring loop\n" << std::flush;
-    
     while (true) {
-        try {
-            std::cout << "[SelfPlay][Monitor] Loop start\n" << std::flush;
+        int current = games_completed.load(std::memory_order_acquire);
+        if (current >= total_games) {
+            break;
+        }
+        
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        
+        current = games_completed.load(std::memory_order_acquire);
+        size_t pending_inference = inference_queue.pending_count();
+        
+        if (current > last_reported) {
+            auto elapsed = std::chrono::steady_clock::now() - start_time;
+            auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+            float games_per_sec = (elapsed_sec > 0) ? (current / (float)elapsed_sec) : 0.0f;
             
-            // CRITICAL FIX: Check completion before sleeping
-            int current = games_completed.load(std::memory_order_acquire);
-            if (current >= total_games) {
-                std::cout << "[SelfPlay][Monitor] All games completed!\n" << std::flush;
-                break;
-            }
-            
-            std::cout << "[SelfPlay][Monitor] Sleeping for 1 second...\n" << std::flush;
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            std::cout << "[SelfPlay][Monitor] Woke up from sleep\n" << std::flush;
-            
-            std::cout << "[SelfPlay][Monitor] Loading games_completed...\n" << std::flush;
-            current = games_completed.load(std::memory_order_acquire);
-            std::cout << "[SelfPlay][Monitor] games_completed = " << current << "\n" << std::flush;
-            
-            std::cout << "[SelfPlay][Monitor] Querying inference_queue.pending_count()...\n" << std::flush;
-            size_t pending_inference = inference_queue.pending_count();
-            std::cout << "[SelfPlay][Monitor] pending_inference = " << pending_inference << "\n" << std::flush;
-            
-            std::cout << "[SelfPlay][Monitor] Status | completed=" << current 
-                      << " / " << total_games 
-                      << " | pending_inference=" << pending_inference << "\n" << std::flush;
-            
-            std::cout << "[SelfPlay][Monitor] Checking if progress advanced (current=" 
-                      << current << ", last_reported=" << last_reported << ")\n" << std::flush;
-            
-            if (current > last_reported) {
-                auto elapsed = std::chrono::steady_clock::now() - start_time;
-                auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-                float games_per_sec = (elapsed_sec > 0) ? (current / (float)elapsed_sec) : 0.0f;
-                
-                std::cout << "\n[SelfPlay] Progress: " << current << "/" << total_games 
-                          << " games (" << std::fixed << std::setprecision(1) 
-                          << (100.0 * current / total_games) << "%), "
-                          << std::fixed << std::setprecision(2) << games_per_sec << " games/sec, "
-                          << "queue: " << pending_inference << " pending\n" << std::flush;
-                last_reported = current;
-            } else {
-                std::cout << "[SelfPlay][Monitor] No new games completed since last report\n" << std::flush;
-            }
-            
-            std::cout << "[SelfPlay][Monitor] Loop end\n" << std::flush;
-            
-        } catch (const std::exception& e) {
-            std::cerr << "[SelfPlay][Monitor] ERROR in monitoring loop: " 
-                      << e.what() << std::endl;
-            // Continue monitoring despite errors
+            std::cout << "\n[SelfPlay] Progress: " << current << "/" << total_games 
+                      << " games (" << std::fixed << std::setprecision(1) 
+                      << (100.0 * current / total_games) << "%), "
+                      << std::fixed << std::setprecision(2) << games_per_sec << " games/sec, "
+                      << "queue: " << pending_inference << " pending\n" << std::flush;
+            last_reported = current;
         }
     }
     
-    // CRITICAL FIX: Wait for all game threads with timeout
-    std::cout << "\n[SelfPlay] Waiting for all game threads to complete...\n" << std::flush;
-    for (size_t i = 0; i < game_threads.size(); ++i) {
-        std::cout << "[SelfPlay] Joining game thread " << i << "..." << std::flush;
-        try {
-            if (game_threads[i].joinable()) {
-                game_threads[i].join();
-                std::cout << " done\n" << std::flush;
-            } else {
-                std::cout << " already joined\n" << std::flush;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << " ERROR: " << e.what() << "\n" << std::flush;
+    // Wait for all game threads
+    for (auto& thread : game_threads) {
+        if (thread.joinable()) {
+            thread.join();
         }
     }
     
-    // CRITICAL FIX: Signal inference thread to stop
-    std::cout << "[SelfPlay] All game threads joined. Signaling inference thread to stop...\n" << std::flush;
+    // Signal and wait for inference thread
     stop_inference.store(true, std::memory_order_release);
     inference_queue.shutdown();
     
-    // CRITICAL FIX: Wait for inference thread
-    std::cout << "[SelfPlay] Joining inference thread..." << std::flush;
-    try {
-        if (inference_thread.joinable()) {
-            inference_thread.join();
-            std::cout << " done\n" << std::flush;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << " ERROR: " << e.what() << "\n" << std::flush;
+    if (inference_thread.joinable()) {
+        inference_thread.join();
     }
     
     auto end_time = std::chrono::steady_clock::now();
@@ -250,6 +193,7 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     std::cout << "[Evaluation] mcts_simulations   = " << mcts_simulations << "\n";
     std::cout << "[Evaluation] exploration_factor = " << exploration_factor << "\n";
     std::cout << "[Evaluation] dirichlet_epsilon  = " << dirichlet_epsilon << " (should be 0.0)\n";
+    std::cout << "[Evaluation] Using UNIFIED inference queue with dual-model worker\n";
     std::cout << "==============================================\n" << std::flush;
     
     // Validate model pointers
@@ -259,45 +203,38 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     
     auto start_time = std::chrono::steady_clock::now();
     
-    // Create two inference queues (one for each model)
-    InferenceQueue queue1;
-    InferenceQueue queue2;
+    // UNIFIED INFERENCE QUEUE - handles both models
+    InferenceQueue unified_queue;
     
     // Atomic counters and flags
     std::atomic<int> games_completed{0};
     std::atomic<int> model1_wins{0};
     std::atomic<int> model2_wins{0};
     std::atomic<int> draws{0};
-    std::atomic<bool> stop_inference1{false};
-    std::atomic<bool> stop_inference2{false};
+    std::atomic<bool> stop_inference{false};
     
-    // Launch inference threads for both models
-    std::thread inference_thread1(
-        inference_worker,
-        std::ref(queue1),
+    // Launch SINGLE dual-model inference thread
+    std::cout << "[Evaluation] Launching unified dual-model inference thread...\n" << std::flush;
+    std::thread inference_thread(
+        dual_inference_worker,
+        std::ref(unified_queue),
         model1,
-        batch_size,
-        std::ref(stop_inference1));
-    
-    std::thread inference_thread2(
-        inference_worker,
-        std::ref(queue2),
         model2,
         batch_size,
-        std::ref(stop_inference2));
+        std::ref(stop_inference));
     
     // Launch game worker threads
     std::vector<std::thread> game_threads;
     game_threads.reserve(num_parallel_games);
     
+    std::cout << "[Evaluation] Launching " << num_parallel_games << " game workers...\n" << std::flush;
     for (int i = 0; i < num_parallel_games; ++i) {
         game_threads.emplace_back(
             &SelfPlayManager::evaluation_game_worker,
             this,
             i,
             games_per_worker,
-            &queue1,
-            &queue2,
+            &unified_queue,  // Same queue for both models
             board_size,
             mcts_simulations,
             exploration_factor,
@@ -322,13 +259,17 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
             auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
             float games_per_sec = (elapsed_sec > 0) ? (current / (float)elapsed_sec) : 0.0f;
             
+            size_t pending_m1 = unified_queue.pending_count(ModelID::MODEL_1);
+            size_t pending_m2 = unified_queue.pending_count(ModelID::MODEL_2);
+            
             std::cout << "[Evaluation] Progress: " << current << "/" << total_games 
                       << " games (" << std::fixed << std::setprecision(1) 
                       << (100.0 * current / total_games) << "%), "
                       << std::fixed << std::setprecision(2) << games_per_sec << " games/sec"
-                      << " | Model1: " << model1_wins.load()
-                      << " Model2: " << model2_wins.load()
-                      << " Draws: " << draws.load() << "\n" << std::flush;
+                      << " | M1: " << model1_wins.load()
+                      << " M2: " << model2_wins.load()
+                      << " Draws: " << draws.load()
+                      << " | Queue M1:" << pending_m1 << " M2:" << pending_m2 << "\n" << std::flush;
             last_reported = current;
         }
     }
@@ -340,18 +281,12 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
         }
     }
     
-    // Signal inference threads to stop
-    stop_inference1.store(true, std::memory_order_release);
-    stop_inference2.store(true, std::memory_order_release);
-    queue1.shutdown();
-    queue2.shutdown();
+    // Signal and wait for inference thread
+    stop_inference.store(true, std::memory_order_release);
+    unified_queue.shutdown();
     
-    // Wait for inference threads
-    if (inference_thread1.joinable()) {
-        inference_thread1.join();
-    }
-    if (inference_thread2.joinable()) {
-        inference_thread2.join();
+    if (inference_thread.joinable()) {
+        inference_thread.join();
     }
     
     auto end_time = std::chrono::steady_clock::now();
@@ -391,8 +326,7 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
 void SelfPlayManager::evaluation_game_worker(
     int worker_id,
     int num_games,
-    InferenceQueue* queue1,
-    InferenceQueue* queue2,
+    InferenceQueue* queue,  // Single unified queue
     int board_size,
     int mcts_simulations,
     double exploration_factor,
@@ -406,17 +340,17 @@ void SelfPlayManager::evaluation_game_worker(
     std::cout << "[EvalWorker " << worker_id << "] Starting (will play " << num_games << " games)\n" << std::flush;
     
     // Validate pointers
-    if (!queue1 || !queue2 || !games_completed || !model1_wins || !model2_wins || !draws) {
+    if (!queue || !games_completed || !model1_wins || !model2_wins || !draws) {
         std::cerr << "[EvalWorker " << worker_id << "] ERROR: nullptr received!" << std::endl;
         return;
     }
     
-    // Dummy dataset for evaluation (we don't save these games)
+    // Dummy dataset for evaluation
     GameDataset dummy_dataset(100);
     
     for (int game_idx = 0; game_idx < num_games; ++game_idx) {
         try {
-            // Create players with deterministic temperature (0.0)
+            // Create players with MODEL_ID tags
             auto player1 = std::make_unique<Mcts_player_selfplay>(
                 exploration_factor,
                 mcts_simulations,
@@ -424,7 +358,10 @@ void SelfPlayManager::evaluation_game_worker(
                 0.0f,  // Deterministic for evaluation
                 dirichlet_alpha,
                 dirichlet_epsilon,  // Should be 0.0 for evaluation
-                queue1);
+                queue,
+                -1,
+                false,
+                ModelID::MODEL_1);  // Tag for model 1
             
             auto player2 = std::make_unique<Mcts_player_selfplay>(
                 exploration_factor,
@@ -433,7 +370,10 @@ void SelfPlayManager::evaluation_game_worker(
                 0.0f,  // Deterministic for evaluation
                 dirichlet_alpha,
                 dirichlet_epsilon,  // Should be 0.0 for evaluation
-                queue2);
+                queue,
+                -1,
+                false,
+                ModelID::MODEL_2);  // Tag for model 2
             
             // Create and play game (evaluation=true means don't save to dataset)
             Game game(board_size, std::move(player1), std::move(player2), 
@@ -476,55 +416,46 @@ void SelfPlayManager::game_worker(
     
     std::cout << "[Worker " << worker_id << "] Starting (will play " << num_games << " games)\n" << std::flush;
     
-    // CRITICAL FIX: Validate pointers
     if (!queue || !dataset || !games_completed) {
         std::cerr << "[Worker " << worker_id << "] ERROR: nullptr received!" << std::endl;
         return;
     }
     
-    // CRITICAL FIX: Use smaller local dataset and handle exceptions
-    GameDataset local_dataset(num_games * 20);  // Estimate ~100 moves per game
+    GameDataset local_dataset(num_games * 20);
     
     for (int game_idx = 0; game_idx < num_games; ++game_idx) {
         try {
-            std::cout << "[Worker " << worker_id << "] Starting game " 
-                      << (game_idx + 1) << "/" << num_games << "\n" << std::flush;
+            // For self-play, both players use MODEL_1 (same model)
+            auto player1 = std::make_unique<Mcts_player_selfplay>(
+                exploration_factor,
+                mcts_simulations,
+                LogLevel::NONE,
+                1.0f,
+                dirichlet_alpha,
+                dirichlet_epsilon,
+                queue,
+                -1,
+                false,
+                ModelID::MODEL_1);
+
             
-            // CRITICAL FIX: Create players with proper error handling
-            std::unique_ptr<Mcts_player_selfplay> player1;
-            std::unique_ptr<Mcts_player_selfplay> player2;
+            auto player2 = std::make_unique<Mcts_player_selfplay>(
+                exploration_factor,
+                mcts_simulations,
+                LogLevel::NONE,
+                1.0f,
+                dirichlet_alpha,
+                dirichlet_epsilon,
+                queue,
+                -1,
+                false,
+                ModelID::MODEL_1);
             
-            try {
-                player1 = std::make_unique<Mcts_player_selfplay>(
-                    exploration_factor,
-                    mcts_simulations,
-                    LogLevel::NONE,
-                    1.0f,
-                    dirichlet_alpha,
-                    dirichlet_epsilon,
-                    queue);
-                
-                player2 = std::make_unique<Mcts_player_selfplay>(
-                    exploration_factor,
-                    mcts_simulations,
-                    LogLevel::NONE,
-                    1.0f,
-                    dirichlet_alpha,
-                    dirichlet_epsilon,
-                    queue);
-            } catch (const std::exception& e) {
-                std::cerr << "[Worker " << worker_id << "] ERROR creating players: " 
-                          << e.what() << std::endl;
-                throw;
-            }
-            
-            // Create and play game
             Game game(board_size, std::move(player1), std::move(player2), 
-                     local_dataset, false);  // evaluation=false for training
+                     local_dataset, false);
             
             Cell_state winner = game.play();
             
-            // CRITICAL FIX: Update completion counter with proper memory ordering
             int completed = games_completed->fetch_add(1, std::memory_order_release) + 1;
             
             std::cout << "[Worker " << worker_id << "] Completed game " 
@@ -535,19 +466,11 @@ void SelfPlayManager::game_worker(
         } catch (const std::exception& e) {
             std::cerr << "[Worker " << worker_id << "] ERROR in game " 
                       << (game_idx + 1) << ": " << e.what() << std::endl;
-            // Continue with next game rather than crashing entire worker
         }
     }
     
-    // CRITICAL FIX: Merge with error handling
     try {
-        std::cout << "[Worker " << worker_id << "] Merging " 
-                  << local_dataset.actual_size() << " examples into global dataset...\n" << std::flush;
-        
         dataset->merge(local_dataset);
-        
-        std::cout << "[Worker " << worker_id << "] Merge complete. Global dataset now has " 
-                  << dataset->actual_size() << " examples.\n" << std::flush;
     } catch (const std::exception& e) {
         std::cerr << "[Worker " << worker_id << "] ERROR merging dataset: " 
                   << e.what() << std::endl;

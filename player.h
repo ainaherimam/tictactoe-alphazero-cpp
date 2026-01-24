@@ -289,7 +289,8 @@ class Mcts_player_selfplay : public Player {
                        float dirichlet_epsilon = 0.25f,
                        InferenceQueue* inference_queue = nullptr,
                        int max_depth = 100,
-                       bool tree_reuse = false);
+                       bool tree_reuse = false,
+                       ModelID model_id = ModelID::MODEL_1);
   
   /**
    * @brief Implementation of the choose_move function for the Mcts_player_selfplay class
@@ -335,4 +336,5 @@ class Mcts_player_selfplay : public Player {
   InferenceQueue* inference_queue;  
   int max_depth;
   bool tree_reuse;
+  ModelID model_id;
 };

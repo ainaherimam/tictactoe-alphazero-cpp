@@ -9,7 +9,7 @@
 #include "game.h"
 #include "alphaz_model.h"
 #include "game_dataset.h"
-#include "selfplay_manager.h"
+
 
 /**
  * @brief Checks if the input string is an integer.
@@ -92,7 +92,7 @@ double get_parameter_within_bounds<double>(const std::string& prompt,
                                             double upper_bound);
 
 /**
- * @brief Creates a Monte Carlo Tree Search (MCTS) player with custom
+ * @brief Creates a Monte Carlo Tree Search (MCTS) player with its
  * parameters.
  * 
  * This function prompts the user for various parameters to initialize the MCTS
@@ -104,8 +104,8 @@ double get_parameter_within_bounds<double>(const std::string& prompt,
 std::unique_ptr<Mcts_player> create_mcts_agent(const std::string& agent_prompt);
 
 /**
- * @brief Creates a Monte Carlo Tree Search (MCTS) player with custom
- * parameters.
+ * @brief Creates a Monte Carlo Tree Search (MCTS) player guided by a NN with its
+ * parameters and Tree parallelization implemented.
  * 
  * This function prompts the user for various parameters to initialize the MCTS
  * agent.
@@ -115,12 +115,6 @@ std::unique_ptr<Mcts_player> create_mcts_agent(const std::string& agent_prompt);
  */
 std::unique_ptr<Mcts_player_parallel> create_mcts_agent_parallel(const std::string& agent_prompt);
 
-/**
- * @brief A simple countdown function.
- * 
- * @param seconds The number of seconds to count down from.
- */
-void countdown(int seconds);
 
 /**
  * @brief Start a game against an MCTS agent.
@@ -147,12 +141,11 @@ void start_robot_arena();
 void start_human_arena();
 
 /**
- * @brief Run the console interface of the game.
+ * @brief Run the console interface.
  * 
  * This function drives the main loop of the console interface.
  * It displays a menu and handles user's selection,
- * allowing the user to start different types of games or read the game docs.
- * It also handles exceptions and displays appropriate error messages.
+ * allowing the user to start different types of games.
  */
 void run_console_interface();
 
@@ -167,7 +160,7 @@ void init();
 void selfplay();
 
 /**
- * @brief Evaluate if the candidate model perform better than , with the same MCTS 
+ * @brief Evaluate if the candidate model perform better than the best available, with the same MCTS 
  * seach parameters but guided by 2 differents models.
  */
 void evaluate(std::string eval_model_path, std::string last_model_path);
@@ -186,7 +179,7 @@ int clean();
 void print_welcome_ascii_art();
 
 /**
- * @brief Displays the Board object and the winner from the pieces on the board.
+ * @brief Displays the Board object and the winner.
  * 
  * This function is used for demonstration purposes to show a winning condition.
  * 

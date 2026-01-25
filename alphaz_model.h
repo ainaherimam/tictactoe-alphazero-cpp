@@ -44,7 +44,7 @@ public:
      * @brief Forward pass through the network
      * 
      * @param x Input board state tensor
-     * @param legal_mask Optional mask for legal moves
+     * @param legal_mask legal mask for legal moves
      * 
      * @return Pair of policy log-probabilities and value prediction
      */
@@ -89,7 +89,7 @@ public:
 };
 
 /**
- * @brief Computes the AlphaZero combined loss function
+ * @brief Calculates the AlphaZero combined loss function
  * 
  * Combines cross-entropy loss for policy and mean squared error for value.
  * 
@@ -116,7 +116,7 @@ torch::Tensor alphazero_loss(torch::Tensor policy_pred, torch::Tensor value_pred
  * @param lr Initial learning rate for Adam optimizer
  * @param device Device to train on (CPU or CUDA)
  * @param log_interval Number of steps between metric logging
- * @param detailed_logging Whether to print detailed loss components (policy/value)
+ * @param detailed_logging Print detailed loss components (policy/value) or not
  */
 void train(std::shared_ptr<AlphaZModel> model, GameDataset& dataset, 
            int batch_size = 32, int training_steps = 1000, 

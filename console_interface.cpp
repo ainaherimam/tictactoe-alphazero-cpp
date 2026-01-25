@@ -168,7 +168,7 @@ void start_match_against_robot() {
         "Player 2 (O): ",
         1, 2);
 
-    int board_size = 9;
+    int board_size = 4;
 
     auto mcts_agent = create_mcts_agent("agent");
     auto human_player = std::make_unique<Human_player>();
@@ -185,7 +185,7 @@ void start_match_against_robot() {
 
 void start_robot_arena() {
     GameDataset dataset(1000);
-    int board_size = 9;
+    int board_size = 4;
 
     auto mcts_agent_1 = create_mcts_agent("first agent");
     auto mcts_agent_2 = create_mcts_agent("second agent");
@@ -241,31 +241,20 @@ void selfplay() {
     const std::string BEST_MODEL_PATH = "checkpoint/best.pt";
     
     std::cout << "🌱 Starting AlphaZero self-play training...\n";
-    std::cout << "\n[Configuration]" << std::endl;
-    std::cout << "Board size: " << BOARD_SIZE << "x" << BOARD_SIZE << std::endl;
-    std::cout << "Parallel games: " << NUM_PARALLEL_GAMES << std::endl;
-    std::cout << "Games per worker: " << GAMES_PER_WORKER << std::endl;
+    std::cout << "Parallel games: " << NUM_PARALLEL_GAMES << " - Games per worker: " << GAMES_PER_WORKER << std::endl;
     std::cout << "Total games per iteration: " << (NUM_PARALLEL_GAMES * GAMES_PER_WORKER) << std::endl;
     std::cout << "Training iterations: " << NUM_ITERATIONS << std::endl;
     
-    // ========================================
-    // LOAD BEST MODEL
-    // ========================================
     
     auto best_model = AlphaZModel::load_model(BEST_MODEL_PATH);
     best_model->to(device);
     best_model->eval();
-    
-    // ========================================
-    // INITIALIZE SELF-PLAY MANAGER
-    // ========================================
+
     
     SelfPlayManager selfplay_manager;
     
-    // ========================================
     // MAIN TRAINING LOOP
-    // ========================================
-    
+
     int total_games = 0;
     
     for (int iteration = 1; iteration <= NUM_ITERATIONS; ++iteration) {
@@ -273,10 +262,7 @@ void selfplay() {
         std::cout << "🔁 ITERATION " << iteration << "/" << NUM_ITERATIONS << "\n";
         std::cout << "========================================\n\n";
         
-        // ========================================
         // PHASE 1: SELF-PLAY DATA GENERATION
-        // ========================================
-        
         std::cout << "🎮 Generating training data through parallel self-play...\n";
         
         size_t dataset_size_before = dataset.actual_size();
@@ -310,10 +296,9 @@ void selfplay() {
             continue;
         }
         
-        // ========================================
+
         // PHASE 2: NEURAL NETWORK TRAINING
-        // ========================================
-        
+    
         std::cout << "🎯 Training network for " << TRAINING_STEPS << " steps...\n";
         
         auto candidate_model = AlphaZModel::load_model(BEST_MODEL_PATH);
@@ -333,26 +318,19 @@ void selfplay() {
         // Set back to evaluation mode
         candidate_model->eval();
         
-        // ========================================
         // PHASE 3: CHECKPOINTING
-        // ========================================
         
         std::string checkpoint_path = CHECKPOINT_DIR + "/iter_" + std::to_string(iteration) + ".pt";
         candidate_model->save_model(checkpoint_path);
         std::cout << "💾 Saved checkpoint: " << checkpoint_path << "\n";
         
-        // ========================================
+
         // PHASE 4: EVALUATION
-        // ========================================
         
         if (iteration % EVALUATION_INTERVAL == 0) {
             std::cout << "\n⚔️  Evaluating new model vs current best...\n";
             evaluate(BEST_MODEL_PATH, checkpoint_path);
         }
-        
-        // ========================================
-        // SAVE DATASET PERIODICALLY
-        // ========================================
         
         if (iteration % CHECKPOINT_INTERVAL == 0) {
             std::string dataset_path = "dataset" + std::to_string(iteration);
@@ -363,10 +341,8 @@ void selfplay() {
         std::cout << "\n✅ Iteration " << iteration << " complete!\n";
     }
     
-    // ========================================
+
     // SAVE FINAL DATASET
-    // ========================================
-    
     dataset.save(CHECKPOINT_DIR + "/dataset");
     std::cout << "\n🎉 Training complete! Total games played: " << total_games << "\n";
 }
@@ -414,15 +390,10 @@ int clean() {
 
 void evaluate(std::string best_model_path, std::string candidate_model_path) {
     
-    std::string best_filename = best_model_path.substr(best_model_path.find_last_of("/\\") + 1);
-    std::string candidate_filename = candidate_model_path.substr(candidate_model_path.find_last_of("/\\") + 1);
-    
-    // ========================================
+
     // CONFIGURATION PARAMETERS
-    // ========================================
     
-    // Board configuration
-    const int BOARD_SIZE = 9;
+    const int BOARD_SIZE = 4;
     
     // Self-play configuration
     const int NUM_PARALLEL_GAMES = 12;
@@ -430,10 +401,10 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     const int BATCH_SIZE = 12;
     const int MCTS_SIMULATIONS = 100;
     
-    // MCTS parameters (deterministic for evaluation)
+    // MCTS parameters (No exploration noise for evaluation)
     const double EXPLORATION_FACTOR = 1.41;
     const float DIRICHLET_ALPHA = 0.3f;
-    const float DIRICHLET_EPSILON = 0.0f;  // No exploration noise during evaluation
+    const float DIRICHLET_EPSILON = 0.0f;
     
     // Evaluation configuration
     const float REPLACEMENT_THRESHOLD = 55.0f;
@@ -441,18 +412,14 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     // Calculate games per worker
     int games_per_worker = (GAMES_PER_PHASE + NUM_PARALLEL_GAMES - 1) / NUM_PARALLEL_GAMES;
     
-    // ========================================
-    // DEVICE SETUP
-    // ========================================
-    
+
+    // DEVICE 
     torch::manual_seed(0);
     torch::Device device(torch::kCUDA);
     if (!torch::cuda::is_available()) device = torch::kCPU;
     
-    // ========================================
+
     // LOAD MODELS
-    // ========================================
-    
     auto best_model = AlphaZModel::load_model(best_model_path);
     best_model->to(device);
     best_model->eval();
@@ -461,19 +428,13 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     candidate_model->to(device);
     candidate_model->eval();
     
-    // ========================================
+
     // INITIALIZE MANAGER
-    // ========================================
-    
     SelfPlayManager selfplay_manager;
     
-    std::cout << "\n=============================\n";
-    std::cout << "🔁 ALPHAZERO EVALUATION \n";
-    std::cout << "=============================\n\n";
-    
-    // ========================================
-    // PHASE 1: BEST AS X, CANDIDATE AS O
-    // ========================================
+    std::cout << "\n====================\n";
+    std::cout << "🔁    EVALUATION \n";
+    std::cout << "======================\n\n";
     
     std::cout << "▶ Phase 1: Playing " << GAMES_PER_PHASE << " games - Best as X, Candidate as O\n\n";
     
@@ -497,10 +458,7 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     std::cout << "Phase 1 Results: Best: " << best_wins 
               << " Candidate: " << candidate_wins 
               << " Draws: " << draws << "\n\n";
-    
-    // ========================================
-    // PHASE 2: CANDIDATE AS X, BEST AS O
-    // ========================================
+  
     
     std::cout << "▶ Phase 2: Playing " << GAMES_PER_PHASE << " games - Candidate as X, Best as O\n\n";
     
@@ -528,10 +486,6 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
               << " Candidate: " << phase2_results.model1_wins 
               << " Draws: " << phase2_results.draws << "\n\n";
     
-    // ========================================
-    // CALCULATE FINAL RESULTS
-    // ========================================
-    
     // Scoring: win=1, draw=0.5, loss=0
     float candidate_score = candidate_wins + (draws * 0.5f);
     float best_score = best_wins + (draws * 0.5f);
@@ -552,9 +506,6 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     std::cout << "  Best model          : " << best_winrate << "%\n";
     std::cout << "  Candidate           : " << candidate_winrate << "%\n\n";
     
-    // ========================================
-    // MODEL REPLACEMENT DECISION
-    // ========================================
     
     bool should_replace = (candidate_winrate >= REPLACEMENT_THRESHOLD);
     
@@ -713,7 +664,7 @@ void evaluate_vs_minimax(){
 
 void start_human_arena() {
   GameDataset dataset(1000);
-  int board_size = 9;
+  int board_size = 4;
   auto human_player_1 = std::make_unique<Human_player>();
   auto human_player_2 = std::make_unique<Human_player>();
   Game game(board_size, std::move(human_player_1), std::move(human_player_2), dataset);

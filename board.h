@@ -17,16 +17,12 @@
  * game board, including:
  *   - Initializing the board
  *   - Displaying the board in the console
- *   - Computing all valid moves
  *   - Making a move on the board
  *   - Checking if there is a winner
  *
- * The Board class also overloads the << operator to enable printing the board
- * directly to an output stream.
- *
  * The board is represented internally as a 2D vector of Cell_state. The
- * Cell_state enum represents the state of a cell on the board (empty, occupied
- * by player 1, or occupied by player 2).
+ * Cell_state enum represents the state of a cell on the board (empty,X:occupied
+ * by player 1,  or O: occupied by player 2).
  */
 class Board {
 
@@ -91,14 +87,14 @@ public:
     std::vector<std::array<int, 4>> get_valid_moves(Cell_state player) const;
 
     /**
-     * @brief Execute a move on the board
+     * @brief Place a piece on the board
      *
      * Updates the board state based on the specified move.
      *
      * @param move_x The x-coordinate of the cell
      * @param move_y The y-coordinate of the cell
-     * @param dir The direction of the move
-     * @param tar The chosen target
+     * @param dir The direction of the move (not used on TTT)
+     * @param tar The chosen target (not used on TTT)
      * @param player The current player
      */
     void make_move(int move_x, int move_y, int dir, int tar, Cell_state player);
@@ -120,8 +116,20 @@ public:
      */
     torch::Tensor to_tensor(Cell_state player) const;
 
+    /**
+     * @brief Fill a given tensor with the tensor represenatation of the board for data collection
+     *
+     * @param player The current player
+     */
     void fill_tensor(torch::Tensor& tensor, Cell_state player) const;
 
+    /**
+     * @brief Fill a given tensor with the mask of all legal and illegal moves of the board for data collection
+     *
+     * @param player The current player
+     *
+     * @return Tensor representation of the board state
+     */
     void fill_mask(torch::Tensor& mask, Cell_state player) const;
 
     /**

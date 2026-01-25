@@ -13,25 +13,11 @@ GameDataset::GameDataset(size_t max_size_) : max_size(max_size_) {
     legal_mask.resize(max_size);
 }
 
-std::string GameDataset::hash_board(const torch::Tensor& board) const {
-    auto accessor = board.accessor<float, 3>();
-    std::ostringstream oss;
-    for (int z = 0; z < 2; ++z) {
-        for (int i = 0; i < board.size(1); ++i) {
-            for (int j = 0; j < board.size(2); ++j) {
-                if (i > 0 || j > 0) oss << ",";
-                oss << accessor[z][i][j];
-            }
-        }
-    }
-    return oss.str();
-}
-
 void GameDataset::add_position(torch::Tensor board, torch::Tensor pi, 
                                torch::Tensor z, torch::Tensor mask) {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    // Simply add to circular buffer - NO deduplication
+
     boards[next_index] = board;
     pi_targets[next_index] = pi;
     z_targets[next_index] = z;
@@ -56,10 +42,10 @@ torch::data::Example<> GameDataset::get(size_t) {
 
 torch::optional<size_t> GameDataset::size() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return current_size;  // Return actual size, not max_size
+    return current_size;
 }
 
-void GameDataset::update_last_z(const std::vector<torch::Tensor>& new_z_values, Cell_state winner) {
+void GameDataset::update_z(const std::vector<torch::Tensor>& new_z_values, Cell_state winner) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     size_t count = new_z_values.size();
@@ -85,13 +71,12 @@ void GameDataset::save(const std::string& path) const {
     torch::save(legal_mask, path + "_mask.pt");
 }
 
-// NEW: Thread-safe merge for parallel self-play
+//Thread-safe merge for parallel self-play
 void GameDataset::merge(const GameDataset& other) {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    // Iterate through other's actual stored data
     for (size_t i = 0; i < other.current_size; ++i) {
-        // Add each position to this dataset
+
         boards[next_index] = other.boards[i].clone();
         pi_targets[next_index] = other.pi_targets[i].clone();
         z_targets[next_index] = other.z_targets[i].clone();
@@ -105,13 +90,13 @@ void GameDataset::merge(const GameDataset& other) {
     }
 }
 
-// NEW: Clear the dataset
+// Clear the dataset
 void GameDataset::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     
     current_size = 0;
     next_index = 0;
-    // Optional: clear the vectors to free memory
+
     // boards.clear();
     // pi_targets.clear();
     // z_targets.clear();

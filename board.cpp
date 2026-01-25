@@ -49,14 +49,13 @@ void Board::print_valid_moves(std::vector<std::array<int, 4>> moves) const {
     }
 }
 
-
 std::vector<std::array<int, 4>> Board::get_valid_moves(Cell_state player) const {
     std::vector<std::array<int, 4>> valid_moves;
     
 
     for (int x = 0; x < 4; ++x) {
         for (int y = 0; y < 4; ++y) {
-            // If the cell is empty, it's a valid move
+            // Empty cells means valid move
             if (board[x][y] == Cell_state::Empty) {
                 valid_moves.emplace_back(std::array<int, 4>{x, y, 0, 0});
             }
@@ -100,7 +99,7 @@ void Board::fill_tensor(torch::Tensor& tensor, Cell_state player) const {
     auto accessor = tensor.accessor<float, 3>();
     const float player_plane_value = (player == Cell_state::X) ? 0.0f : 1.0f;
     
-    // Fill current board (planes 0-1)
+    // Plane 0 and Plane 1: Current player's pieces and Opponent's pieces
     for (int x = 0; x < 4; ++x) {
         for (int y = 0; y < 4; ++y) {
             Cell_state cell = board[x][y];
@@ -111,7 +110,7 @@ void Board::fill_tensor(torch::Tensor& tensor, Cell_state player) const {
                 accessor[1][x][y] = 1.0f;
             }
             
-            // Player indicator plane (plane 10)
+            // Plane 2: Current player indicator (0 for X, 1 for O)
             accessor[2][x][y] = player_plane_value;
         }
     }
@@ -122,7 +121,6 @@ void Board::fill_mask(torch::Tensor& mask, Cell_state player) const {
     auto accessor = mask.accessor<float, 1>();
     auto valid_moves = get_valid_moves(player);
     
-    // Pre-compute multipliers
     const int Y_DIR_TAR = 4 * 1 * 1;
     const int DIR_TAR = 1 * 1;
     
@@ -141,16 +139,16 @@ void Board::fill_mask(torch::Tensor& mask, Cell_state player) const {
 
 
 Cell_state Board::check_winner() const {
-    // Helper lambda to get the opponent (for Misère rules if kept)
+    // lambda function to get the opponent (for Misère rules)
     auto opponent = [](Cell_state player) -> Cell_state {
         if (player == Cell_state::X) return Cell_state::O;
         if (player == Cell_state::O) return Cell_state::X;
         return Cell_state::Empty;
     };
 
-    // Check horizontal 3-in-a-row (each row has 2 possible sequences)
+    // Check horizontal 3-in-a-rows
     for (int i = 0; i < 4; ++i) {
-        for (int j = 0; j < 2; ++j) { // j can be 0 or 1 (starting columns)
+        for (int j = 0; j < 2; ++j) {
             if (board[i][j] != Cell_state::Empty &&
                 board[i][j] == board[i][j+1] &&
                 board[i][j+1] == board[i][j+2]) {
@@ -159,9 +157,9 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    // Check vertical 3-in-a-row (each column has 2 possible sequences)
+    // Check vertical 3-in-a-rows
     for (int j = 0; j < 4; ++j) {
-        for (int i = 0; i < 2; ++i) { // i can be 0 or 1 (starting rows)
+        for (int i = 0; i < 2; ++i) {
             if (board[i][j] != Cell_state::Empty &&
                 board[i][j] == board[i+1][j] &&
                 board[i+1][j] == board[i+2][j]) {
@@ -170,7 +168,7 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    // Check diagonal 3-in-a-row (top-left to bottom-right direction)
+    // Check diagonal 3-in-a-rows
     for (int i = 0; i < 2; ++i) {
         for (int j = 0; j < 2; ++j) {
             if (board[i][j] != Cell_state::Empty &&
@@ -181,7 +179,7 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    // Check anti-diagonal 3-in-a-row (top-right to bottom-left direction)
+    // Check anti-diagonal 3-in-a-rows
     for (int i = 0; i < 2; ++i) {
         for (int j = 2; j < 4; ++j) {
             if (board[i][j] != Cell_state::Empty &&
@@ -192,7 +190,7 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    return Cell_state::Empty; // No winning line yet
+    return Cell_state::Empty;
 }
 
 // Cell_state Board::check_winner() const {

@@ -34,7 +34,7 @@ AlphaZModel::AlphaZModel(int C, int H_, int W_,
             register_module("res_bn2_" + std::to_string(i), bn2));
     }
     
-    // Policy head
+
     policy_head_conv = register_module("policy_head_conv", 
         torch::nn::Conv2d(torch::nn::Conv2dOptions(channels, 2, 1)));
     policy_head_bn = register_module("policy_head_bn", 
@@ -42,13 +42,13 @@ AlphaZModel::AlphaZModel(int C, int H_, int W_,
     policy_fc = register_module("policy_fc", 
         torch::nn::Linear(2 * H * W, num_moves));
     
-    // Value head (smaller for 4x4)
+
     value_head_conv = register_module("value_head_conv", 
         torch::nn::Conv2d(torch::nn::Conv2dOptions(channels, 1, 1)));
     value_head_bn = register_module("value_head_bn", 
         torch::nn::BatchNorm2d(1));
     value_fc1 = register_module("value_fc1", 
-        torch::nn::Linear(H * W, 64));  // 64 is fine for 4x4
+        torch::nn::Linear(H * W, 64));
     value_fc2 = register_module("value_fc2", 
         torch::nn::Linear(64, 1));
 }
@@ -56,10 +56,9 @@ AlphaZModel::AlphaZModel(int C, int H_, int W_,
 std::pair<torch::Tensor, torch::Tensor> AlphaZModel::forward(
     torch::Tensor x, torch::Tensor legal_mask) {
     
-    // Initial convolution
     x = torch::relu(conv_in_bn->forward(conv_in->forward(x)));
     
-    // Residual blocks (proper implementation)
+    // Residual blocks
     for (size_t i = 0; i < res_blocks->size(); i += 4) {
         auto residual = x.clone();
         
@@ -70,7 +69,7 @@ std::pair<torch::Tensor, torch::Tensor> AlphaZModel::forward(
         x = res_blocks[i+2]->as<torch::nn::Conv2d>()->forward(x);
         x = res_blocks[i+3]->as<torch::nn::BatchNorm2d>()->forward(x);
         
-        x = torch::relu(x + residual);  // Add residual, then ReLU
+        x = torch::relu(x + residual);  // Add residual
     }
     
     // Policy Head
@@ -129,7 +128,6 @@ torch::Tensor alphazero_loss(torch::Tensor policy_pred, torch::Tensor value_pred
     auto policy_loss = -(pi_target * policy_pred).sum(1).mean();
     auto value_loss = torch::mse_loss(value_pred, z_target);
 
-    //MAYBE L2 REGULARIZATION HERE!!!
     return policy_loss + value_loss;
 }
 
@@ -183,7 +181,6 @@ void train(
         optimizer.zero_grad();
         auto [p, v] = model->forward(b, mask);
         
-        // Compute losses
         auto policy_loss_tensor = -(pi_target * p).sum(1).mean();
         auto value_loss_tensor = torch::mse_loss(v, z_target);
         auto total_loss_tensor = policy_loss_tensor + value_loss_tensor;
@@ -207,7 +204,6 @@ void train(
         total_value_loss += value_loss_tensor.item<double>();
         total_loss += total_loss_tensor.item<double>();
         
-        // Log progress
         if (step % log_interval == 0) {
             double avg_policy_loss = total_policy_loss / log_interval;
             double avg_value_loss = total_value_loss / log_interval;

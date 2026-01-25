@@ -60,8 +60,10 @@ class Game {
    */
   Cell_state simple_play();
 
-  Cell_state evaluate_play();
 
+  /**
+  * @brief Read-only access to the current board
+  */
   const Board& getBoard() const {
         return board;
     }

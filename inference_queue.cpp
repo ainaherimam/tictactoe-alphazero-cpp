@@ -22,13 +22,13 @@ std::pair<torch::Tensor, torch::Tensor> InferenceQueue::evaluate_and_wait(
         model_id);
     auto future = request->result_promise.get_future();
     
-    // Add request to queue
+    // Add request to appropriate queue
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (shutdown_) {
             throw std::runtime_error("InferenceQueue is shut down - cannot submit new requests");
         }
-        request_queue_.push(request);
+        get_queue(model_id).push(request);
     }
     
     // Notify inference thread
@@ -55,33 +55,13 @@ InferenceQueue::get_batch(int batch_size, int timeout_ms, ModelID model_id) {
     auto deadline = std::chrono::steady_clock::now() + 
                    std::chrono::milliseconds(timeout_ms);
     
+    auto& queue = get_queue(model_id);
+    
     // Wait for at least one request for this model or shutdown
-    while (true) {
-        // Check if there's any request for our model
-        bool found = false;
-        std::queue<std::shared_ptr<InferenceRequest>> temp_queue;
-        
-        while (!request_queue_.empty()) {
-            auto req = request_queue_.front();
-            request_queue_.pop();
-            
-            if (req->model_id == model_id) {
-                found = true;
-                request_queue_.push(req);  // Put it back
-                break;
-            } else {
-                temp_queue.push(req);  // Save for later
-            }
-        }
-        
-        // Restore non-matching requests
-        while (!temp_queue.empty()) {
-            request_queue_.push(temp_queue.front());
-            temp_queue.pop();
-        }
-        
-        if (found || shutdown_) {
-            break;
+    while (queue.empty() && !shutdown_) {
+        if (timeout_ms == 0) {
+            // Return immediately if queue empty
+            return batch;
         }
         
         auto status = cv_.wait_until(lock, deadline);
@@ -91,28 +71,14 @@ InferenceQueue::get_batch(int batch_size, int timeout_ms, ModelID model_id) {
     }
     
     // If shutdown and no requests, return empty batch
-    if (shutdown_ && request_queue_.empty()) {
+    if (shutdown_ && queue.empty()) {
         return batch;
     }
     
-    // Collect requests for this specific model
-    std::queue<std::shared_ptr<InferenceRequest>> temp_queue;
-    
-    while (!request_queue_.empty() && batch.size() < static_cast<size_t>(batch_size)) {
-        auto req = request_queue_.front();
-        request_queue_.pop();
-        
-        if (req->model_id == model_id) {
-            batch.push_back(req);
-        } else {
-            temp_queue.push(req);  // Different model, save for later
-        }
-    }
-    
-    // Put back requests for other models
-    while (!temp_queue.empty()) {
-        request_queue_.push(temp_queue.front());
-        temp_queue.pop();
+    // Collect requests from the specific model's queue
+    while (!queue.empty() && batch.size() < static_cast<size_t>(batch_size)) {
+        batch.push_back(queue.front());
+        queue.pop();
     }
     
     return batch;
@@ -120,23 +86,12 @@ InferenceQueue::get_batch(int batch_size, int timeout_ms, ModelID model_id) {
 
 size_t InferenceQueue::pending_count(ModelID model_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    size_t count = 0;
-    std::queue<std::shared_ptr<InferenceRequest>> temp_queue = request_queue_;
-    
-    while (!temp_queue.empty()) {
-        if (temp_queue.front()->model_id == model_id) {
-            count++;
-        }
-        temp_queue.pop();
-    }
-    
-    return count;
+    return get_queue(model_id).size();
 }
 
 size_t InferenceQueue::pending_count() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return request_queue_.size();
+    return queue_model1_.size() + queue_model2_.size();
 }
 
 void InferenceQueue::shutdown() {

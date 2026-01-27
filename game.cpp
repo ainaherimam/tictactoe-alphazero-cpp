@@ -3,21 +3,25 @@
 #include <torch/torch.h>
 #include <chrono>
 #include "alphaz_model.h"
-
+#include <vector>
+#include <algorithm>
+#include <map>
+#include <set>
 #include <iostream>
 #include <random>
 
 
 static std::mt19937 random_generator(std::random_device{}());
 
-
 Game::Game(int board_size, std::unique_ptr<Player> player1,
-           std::unique_ptr<Player> player_2, GameDataset& dataset, bool evaluation)
-    : board(board_size), current_player_index(0), dataset_(dataset), evaluation(evaluation) {
+           std::unique_ptr<Player> player_2, GameDataset& dataset, bool evaluation, Cell_state player_to_evaluate)
+    : board(board_size), current_player_index(0), dataset_(dataset), evaluation(evaluation), player_to_evaluate(player_to_evaluate) {
   players[0] = std::move(player1);
   players[1] = std::move(player_2);
 
   result_z.clear();
+  optimal_moves = 0;
+  eval_moves = 0;
 }
 
 Cell_state Game::play() {
@@ -54,7 +58,7 @@ Cell_state Game::play() {
 
         auto [chosen_move, logits] = players[current_player_index]->choose_move(board, current_player);
         
-
+        
         if (!evaluation){
             //Collect data
             auto board_tensor = board.to_tensor(current_player);
@@ -71,6 +75,17 @@ Cell_state Game::play() {
             dataset_.add_position(board_tensor, pi_tensor, z_tensor, mask_tensor);
         }
 
+        //TOP 1 ACCURACY
+        else if (evaluation && move_counter >= 4 && current_player==player_to_evaluate) {
+            auto [chosen_move, minimax_logits] = minimax_agent->choose_move(board, current_player);
+            auto mask = board.get_legal_mask(current_player);
+            bool is_optimal = is_policy_optimal(logits, minimax_logits,mask);
+            // std::cout << "Policy chose optimal move: " << (is_optimal ? "YES" : "NO") << "\n";
+            eval_moves++;
+            if (is_optimal) {
+                optimal_moves++;
+            }
+        }
 
         int chosen_x = chosen_move[0];
         int chosen_y = chosen_move[1];
@@ -187,3 +202,81 @@ void Game::random_move(int random_move_number) {
     }
 }
 
+bool Game::is_policy_optimal(const torch::Tensor& policy_logits, 
+                       const torch::Tensor& minimax_logits,
+                       const torch::Tensor& legal_mask) {
+    auto policy_flat = policy_logits.flatten();
+    auto minimax_flat = minimax_logits.flatten();
+    auto mask_flat = legal_mask.flatten();
+    
+    auto policy_acc = policy_flat.accessor<float, 1>();
+    auto minimax_acc = minimax_flat.accessor<float, 1>();
+    auto mask_acc = mask_flat.accessor<float, 1>();
+    
+    const float EPSILON = 1e-6;
+    
+    // Find policy's top-1 move (x, y) - only among legal moves
+    int policy_best_idx = -1;
+    float policy_max_score = -std::numeric_limits<float>::infinity();
+    for (int i = 0; i < policy_flat.size(0); ++i) {
+        if (mask_acc[i] > 0.5f && policy_acc[i] > policy_max_score) {
+            policy_max_score = policy_acc[i];
+            policy_best_idx = i;
+        }
+    }
+    
+    if (policy_best_idx == -1) {
+        std::cout << "No legal moves found!\n";
+        return false;
+    }
+    
+    int policy_x = policy_best_idx / 4;
+    int policy_y = policy_best_idx % 4;
+    
+    // Find all policy moves with top score (ties) - only legal
+    std::set<std::pair<int, int>> policy_optimal_moves;
+    for (int i = 0; i < policy_flat.size(0); ++i) {
+        if (mask_acc[i] > 0.5f && std::abs(policy_acc[i] - policy_max_score) < EPSILON) {
+            int x = i / 4;
+            int y = i % 4;
+            policy_optimal_moves.insert({x, y});
+        }
+    }
+    
+    // Find all minimax optimal moves (all with max score) - only legal
+    float minimax_max_score = -std::numeric_limits<float>::infinity();
+    for (int i = 0; i < minimax_flat.size(0); ++i) {
+        if (mask_acc[i] > 0.5f && minimax_acc[i] > minimax_max_score) {
+            minimax_max_score = minimax_acc[i];
+        }
+    }
+    
+    std::set<std::pair<int, int>> minimax_optimal_moves;
+    for (int i = 0; i < minimax_flat.size(0); ++i) {
+        if (mask_acc[i] > 0.5f && std::abs(minimax_acc[i] - minimax_max_score) < EPSILON) {
+            int x = i / 4;
+            int y = i % 4;
+            minimax_optimal_moves.insert({x, y});
+        }
+    }
+    
+    // // Print policy's top-1 move(s)
+    // std::cout << "Policy Top-1 Move(s) (score: " << policy_max_score << "): ";
+    // for (const auto& [x, y] : policy_optimal_moves) {
+    //     std::cout << "(" << x << "," << y << ") ";
+    // }
+    // std::cout << "\n";
+    
+    // // Print minimax's optimal move(s)
+    // std::cout << "Minimax Optimal Move(s) (score: " << minimax_max_score << "): ";
+    // for (const auto& [x, y] : minimax_optimal_moves) {
+    //     std::cout << "(" << x << "," << y << ") ";
+    // }
+    // std::cout << "\n";
+    
+    // // Check if policy's top-1 is in minimax's optimal set
+    bool is_optimal = minimax_optimal_moves.count({policy_x, policy_y}) > 0;
+    // std::cout << "Policy chose optimal: " << (is_optimal ? "YES" : "NO") << "\n\n";
+    
+    return is_optimal;
+}

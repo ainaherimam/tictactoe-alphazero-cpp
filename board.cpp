@@ -13,8 +13,8 @@ Board::Board(int size)
     history(4, std::vector<std::vector<Cell_state>>(4, std::vector<Cell_state>(4, Cell_state::Empty))),
     board(4, std::vector<Cell_state>(4, Cell_state::Empty)) {
 
-        // board[2][1] = Cell_state::O;
-        // board[2][3] = Cell_state::X;
+        // board[0][0] = Cell_state::X;
+        // board[3][3] = Cell_state::O;
         // board[2][1] = Cell_state::O;
         // board[3][3] = Cell_state::X;
         // board[0][0] = Cell_state::O;
@@ -26,6 +26,7 @@ int Board::get_board_size() const { return board_size; }
 bool Board::is_within_bounds(int move_x, int move_y) const {
     return move_x >= 0 && move_x < 4 && move_y >= 0 && move_y < 4;
 }
+
 
 void Board::add_history() {
     if (history.size() == 4) {
@@ -48,6 +49,7 @@ void Board::print_valid_moves(std::vector<std::array<int, 4>> moves) const {
         index++;
     }
 }
+
 
 std::vector<std::array<int, 4>> Board::get_valid_moves(Cell_state player) const {
     std::vector<std::array<int, 4>> valid_moves;

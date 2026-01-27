@@ -4,6 +4,7 @@
 #include "alphaz_model.h"
 #include "game_dataset.h"
 #include "inference_queue.h"
+#include "cell_state.h"
 #include <memory>
 #include <atomic>
 
@@ -14,6 +15,8 @@ struct EvaluationResults {
     int total_games;
     float model1_winrate;
     float model2_winrate;
+    int optimal_moves;
+    int eval_moves;
 };
 
 class SelfPlayManager {
@@ -45,7 +48,8 @@ public:
         int board_size,
         double exploration_factor,
         float dirichlet_alpha,
-        float dirichlet_epsilon);
+        float dirichlet_epsilon,
+        Cell_state player_to_evaluate = Cell_state::Empty);
     
 private:
     // Worker for self-play games
@@ -71,6 +75,9 @@ private:
         double exploration_factor,
         float dirichlet_alpha,
         float dirichlet_epsilon,
+        Cell_state player_to_evaluate,
+        std::atomic<int>* optimal_moves,
+        std::atomic<int>* eval_moves,
         std::atomic<int>* games_completed,
         std::atomic<int>* model1_wins,
         std::atomic<int>* model2_wins,

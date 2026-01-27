@@ -9,6 +9,9 @@
 #include "game_dataset.h"
 #include "alphaz_model.h"
 #include "logger.h"
+#include <torch/torch.h>
+#include "metrics_logger.h"  // Custom metrics logger for W&B
+
 
 namespace fs = std::filesystem;
 
@@ -174,11 +177,11 @@ void start_match_against_robot() {
     auto human_player = std::make_unique<Human_player>();
 
     if (human_player_number == 1) {
-        Game game(board_size, std::move(human_player), std::move(mcts_agent), dataset);
+        Game game(board_size, std::move(human_player), std::move(mcts_agent), dataset, true);
         game.simple_play();
     }
     else {
-        Game game(board_size, std::move(mcts_agent), std::move(human_player), dataset);
+        Game game(board_size, std::move(mcts_agent), std::move(human_player), dataset, true);
         game.simple_play();
     }
 }
@@ -196,7 +199,6 @@ void start_robot_arena() {
 
 
 void selfplay() {
-    torch::manual_seed(0);
     torch::Device device(torch::kCUDA);
     if (!torch::cuda::is_available()) device = torch::kCPU;
     
@@ -205,57 +207,91 @@ void selfplay() {
     // ========================================
     
     // Board configuration
-    const int BOARD_SIZE = 9;
+    const int BOARD_SIZE = 4;
     const int INPUT_CHANNELS = 3;
-    const int NUM_MOVES = 81;
+    const int NUM_MOVES = 20;
     
     // Network architecture
     const int CONV_CHANNELS = 64;
     const int NUM_RES_BLOCKS = 3;
     
     // Dataset configuration
-    const int REPLAY_BUFFER_SIZE = 7500;
+    const int REPLAY_BUFFER_SIZE = 10000;
     GameDataset dataset(REPLAY_BUFFER_SIZE);
     
     // Self-play configuration
     const int NUM_PARALLEL_GAMES = 12;
-    const int GAMES_PER_WORKER = 17;  // 12 * 17 ≈ 200 games per iteration
+    const int GAMES_PER_WORKER = 12;
     const int BATCH_SIZE = 12;
     const int MCTS_SIMULATIONS = 100;
     
     // MCTS parameters
-    const double EXPLORATION_FACTOR = 0.6;
+    const double EXPLORATION_FACTOR = 1.0;
     const float DIRICHLET_ALPHA = 0.2f;
     const float DIRICHLET_EPSILON = 0.15f;
     
     // Training configuration
-    const int NUM_ITERATIONS = 30;
-    const int TRAINING_STEPS = 150;
+    const int NUM_ITERATIONS = 50;
+    const int TRAINING_STEPS = 50;
     const int TRAINING_BATCH_SIZE = 128;
     const float LEARNING_RATE = 1e-3f;
     
     // Checkpointing
-    const int CHECKPOINT_INTERVAL = 3;
-    const int EVALUATION_INTERVAL = 3;
+    const int CHECKPOINT_INTERVAL = 5;
+    const int EVALUATION_INTERVAL = 1;
     const std::string CHECKPOINT_DIR = "checkpoint";
     const std::string BEST_MODEL_PATH = "checkpoint/best.pt";
+    
+    // ========================================
+    // INITIALIZE METRICS LOGGER
+    // ========================================
+    
+    std::string log_dir = "wandb_logs/run_" + std::to_string(std::time(nullptr));
+    MetricsLogger logger(log_dir);
+    
+    // Log hyperparameters as JSON
+    std::map<std::string, std::string> config = {
+        {"board_size", std::to_string(BOARD_SIZE)},
+        {"input_channels", std::to_string(INPUT_CHANNELS)},
+        {"num_moves", std::to_string(NUM_MOVES)},
+        {"conv_channels", std::to_string(CONV_CHANNELS)},
+        {"num_res_blocks", std::to_string(NUM_RES_BLOCKS)},
+        {"replay_buffer_size", std::to_string(REPLAY_BUFFER_SIZE)},
+        {"num_parallel_games", std::to_string(NUM_PARALLEL_GAMES)},
+        {"games_per_worker", std::to_string(GAMES_PER_WORKER)},
+        {"total_games_per_iteration", std::to_string(NUM_PARALLEL_GAMES * GAMES_PER_WORKER)},
+        {"batch_size", std::to_string(BATCH_SIZE)},
+        {"mcts_simulations", std::to_string(MCTS_SIMULATIONS)},
+        {"exploration_factor", std::to_string(EXPLORATION_FACTOR)},
+        {"dirichlet_alpha", std::to_string(DIRICHLET_ALPHA)},
+        {"dirichlet_epsilon", std::to_string(DIRICHLET_EPSILON)},
+        {"num_iterations", std::to_string(NUM_ITERATIONS)},
+        {"training_steps", std::to_string(TRAINING_STEPS)},
+        {"training_batch_size", std::to_string(TRAINING_BATCH_SIZE)},
+        {"learning_rate", std::to_string(LEARNING_RATE)},
+        {"weight_decay", "\"1e-4\""},
+        {"gradient_clip_norm", "1.0"},
+        {"min_learning_rate", "\"1e-4\""},
+        {"checkpoint_interval", std::to_string(CHECKPOINT_INTERVAL)},
+        {"evaluation_interval", std::to_string(EVALUATION_INTERVAL)}
+    };
+    
+    logger.log_config(config);
     
     std::cout << "🌱 Starting AlphaZero self-play training...\n";
     std::cout << "Parallel games: " << NUM_PARALLEL_GAMES << " - Games per worker: " << GAMES_PER_WORKER << std::endl;
     std::cout << "Total games per iteration: " << (NUM_PARALLEL_GAMES * GAMES_PER_WORKER) << std::endl;
     std::cout << "Training iterations: " << NUM_ITERATIONS << std::endl;
     
-    
     auto best_model = AlphaZModel::load_model(BEST_MODEL_PATH);
     best_model->to(device);
     best_model->eval();
-
     
     SelfPlayManager selfplay_manager;
     
     // MAIN TRAINING LOOP
-
     int total_games = 0;
+    int global_step = 0;  // For consistent step tracking
     
     for (int iteration = 1; iteration <= NUM_ITERATIONS; ++iteration) {
         std::cout << "\n========================================\n";
@@ -266,6 +302,7 @@ void selfplay() {
         std::cout << "🎮 Generating training data through parallel self-play...\n";
         
         size_t dataset_size_before = dataset.actual_size();
+        auto selfplay_start = std::chrono::high_resolution_clock::now();
         
         selfplay_manager.generate_training_data(
             NUM_PARALLEL_GAMES,
@@ -280,14 +317,28 @@ void selfplay() {
             DIRICHLET_EPSILON
         );
         
-        size_t new_positions = dataset.actual_size() - dataset_size_before;
+        auto selfplay_end = std::chrono::high_resolution_clock::now();
+        auto selfplay_duration = std::chrono::duration_cast<std::chrono::seconds>(
+            selfplay_end - selfplay_start).count();
+        
         int games_played = NUM_PARALLEL_GAMES * GAMES_PER_WORKER;
         total_games += games_played;
         
         std::cout << "✅ Total games played: " << total_games << "\n";
-        std::cout << "📊 New positions: " << new_positions << "\n";
         std::cout << "📊 Replay buffer size: " << dataset.actual_size() 
                   << "/" << REPLAY_BUFFER_SIZE << "\n\n";
+        
+        // Log self-play metrics
+        logger.add_scalar("iteration", iteration);
+        logger.add_scalar("selfplay/games_played_this_iter", games_played);
+        logger.add_scalar("selfplay/total_games", total_games);
+        logger.add_scalar("selfplay/duration_sec", selfplay_duration);
+        logger.add_scalar("selfplay/games_per_sec", 
+                         games_played / static_cast<double>(std::max(selfplay_duration, 1L)));
+        logger.add_scalar("dataset/size", dataset.actual_size());
+        logger.add_scalar("dataset/utilization", 
+                         dataset.actual_size() / static_cast<double>(REPLAY_BUFFER_SIZE));
+        logger.flush_metrics();
         
         // Skip training if not enough data
         if (dataset.actual_size() < TRAINING_BATCH_SIZE) {
@@ -296,9 +347,7 @@ void selfplay() {
             continue;
         }
         
-
         // PHASE 2: NEURAL NETWORK TRAINING
-    
         std::cout << "🎯 Training network for " << TRAINING_STEPS << " steps...\n";
         
         auto candidate_model = AlphaZModel::load_model(BEST_MODEL_PATH);
@@ -312,39 +361,75 @@ void selfplay() {
             LEARNING_RATE,
             device,
             5,
-            false
+            true,
+            iteration,
+            global_step,
+            logger  // Pass metrics logger
         );
+        
+        global_step += TRAINING_STEPS;
         
         // Set back to evaluation mode
         candidate_model->eval();
         
         // PHASE 3: CHECKPOINTING
-        
         std::string checkpoint_path = CHECKPOINT_DIR + "/iter_" + std::to_string(iteration) + ".pt";
         candidate_model->save_model(checkpoint_path);
         std::cout << "💾 Saved checkpoint: " << checkpoint_path << "\n";
         
-
         // PHASE 4: EVALUATION
-        
         if (iteration % EVALUATION_INTERVAL == 0) {
             std::cout << "\n⚔️  Evaluating new model vs current best...\n";
-            evaluate(BEST_MODEL_PATH, checkpoint_path);
+            
+            // If you have evaluation metrics
+            auto [phase1_results, phase2_results] = evaluate(BEST_MODEL_PATH, checkpoint_path);
+
+            // Log Phase 1 results (Best model plays first)
+            logger.add_scalar("iteration", iteration);
+            logger.add_scalar("evaluation/phase1_candidate_winrate", phase1_results.model2_winrate);
+            logger.add_scalar("evaluation/phase1_candidate_top1_accuracy", 
+                  static_cast<float>(phase1_results.optimal_moves) / 
+                  static_cast<float>(phase1_results.eval_moves));
+
+            // Log Phase 2 results (Candidate model plays first)
+            logger.add_scalar("evaluation/phase2_best_winrate", phase2_results.model2_winrate);
+            logger.add_scalar("evaluation/phase2_candidate_top1_accuracy", 
+                  static_cast<float>(phase2_results.optimal_moves) / 
+                  static_cast<float>(phase2_results.eval_moves));
+
+            // Log Combined results
+            int total_candidate_wins = phase1_results.model2_wins + phase2_results.model1_wins;
+            int total_best_wins = phase1_results.model1_wins + phase2_results.model2_wins;
+            int total_draws = phase1_results.draws + phase2_results.draws;
+            int total_games = phase1_results.total_games + phase2_results.total_games;
+
+            float overall_candidate_winrate = static_cast<float>(total_candidate_wins) / 
+                                              static_cast<float>(total_games);
+
+            logger.add_scalar("evaluation/overall_candidate_winrate", overall_candidate_winrate);
+
+
+            logger.flush_metrics();
         }
-        
+        dataset.print_analysis();
+        dataset.log_metrics(logger,iteration);
         if (iteration % CHECKPOINT_INTERVAL == 0) {
             std::string dataset_path = "dataset" + std::to_string(iteration);
             dataset.save(dataset_path);
+            // dataset.print_analysis();
             std::cout << "💾 Saved dataset: " << dataset_path << "_*.pt\n";
         }
         
         std::cout << "\n✅ Iteration " << iteration << " complete!\n";
     }
     
-
     // SAVE FINAL DATASET
     dataset.save(CHECKPOINT_DIR + "/dataset");
     std::cout << "\n🎉 Training complete! Total games played: " << total_games << "\n";
+    std::cout << "📊 Upload to W&B:\n";
+    std::cout << "   1. Install: pip install wandb\n";
+    std::cout << "   2. Login: wandb login\n";
+    std::cout << "   3. Create new run and upload " << log_dir << "/metrics.csv\n";
 }
 
 
@@ -388,7 +473,7 @@ int clean() {
     return 0;
 }
 
-void evaluate(std::string best_model_path, std::string candidate_model_path) {
+std::pair<EvaluationResults, EvaluationResults> evaluate(std::string best_model_path, std::string candidate_model_path) {
     
 
     // CONFIGURATION PARAMETERS
@@ -397,7 +482,7 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
     
     // Self-play configuration
     const int NUM_PARALLEL_GAMES = 12;
-    const int GAMES_PER_PHASE = 200;  // 200 games per phase
+    const int GAMES_PER_PHASE = 100;
     const int BATCH_SIZE = 12;
     const int MCTS_SIMULATIONS = 100;
     
@@ -448,8 +533,10 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
         BOARD_SIZE,
         EXPLORATION_FACTOR,
         DIRICHLET_ALPHA,
-        DIRICHLET_EPSILON
+        DIRICHLET_EPSILON,
+        Cell_state::O
     );
+    
     
     int best_wins = phase1_results.model1_wins;
     int candidate_wins = phase1_results.model2_wins;
@@ -472,7 +559,8 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
         BOARD_SIZE,
         EXPLORATION_FACTOR,
         DIRICHLET_ALPHA,
-        DIRICHLET_EPSILON
+        DIRICHLET_EPSILON,
+        Cell_state::X
     );
     
     // Accumulate results (candidate is player1 in phase 2, so wins are swapped)
@@ -536,6 +624,7 @@ void evaluate(std::string best_model_path, std::string candidate_model_path) {
         std::cout << "❌ Candidate achieves < " << REPLACEMENT_THRESHOLD 
                   << "%. Current best model kept.\n";
     }
+  return {phase1_results, phase2_results};
 }
 
 void evaluate_vs_minimax(){
@@ -568,7 +657,7 @@ void evaluate_vs_minimax(){
   std::cout << "🔁 EVALUATION VS MINIMAX\n";
   std::cout << "=============================\n\n";
 
-  std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Minimax as X, Candidate as O\n\n";
+  /* std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Minimax as X, Candidate as O\n\n";
 
   while (game_counter < game_number / 2)
   {
@@ -601,7 +690,7 @@ void evaluate_vs_minimax(){
                 << " Best: " << best_model_win << "\n";
 
       game_counter++;
-  }
+  } */
  
   std::cout << "▶ Phase 1: Playing " << game_number / 2 << " games - Best as X, Minimax as O\n\n";
 
@@ -697,7 +786,7 @@ void run_console_interface() {
                 << "[7] Evaluate best model vs Minimax\n"
                 << "[8] (H)Exit\n";
 
-      option = get_parameter_within_bounds("Option: ", 1, 9);
+      option = get_parameter_within_bounds("Option: ", 1, 10);
       std::cout << "\n";
 
       switch (option) {
@@ -725,7 +814,11 @@ void run_console_interface() {
         case 8:
           is_running = false;
           break;
+        case 9:
+          evaluate("checkpoint/best-old-4.pt", "checkpoint/1k.pt");
+          break;
         default:
+          evaluate_vs_minimax();
           break;
       }
     } catch (const std::invalid_argument& e) {

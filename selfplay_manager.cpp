@@ -181,7 +181,8 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     int board_size,
     double exploration_factor,
     float dirichlet_alpha,
-    float dirichlet_epsilon) {
+    float dirichlet_epsilon,
+    Cell_state player_to_evaluate) {
     
     std::cout << "\n==============================================\n";
     std::cout << "[Evaluation] Starting Parallel Evaluation Games\n";
@@ -193,7 +194,6 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     std::cout << "[Evaluation] mcts_simulations   = " << mcts_simulations << "\n";
     std::cout << "[Evaluation] exploration_factor = " << exploration_factor << "\n";
     std::cout << "[Evaluation] dirichlet_epsilon  = " << dirichlet_epsilon << " (should be 0.0)\n";
-    std::cout << "[Evaluation] Using UNIFIED inference queue with dual-model worker\n";
     std::cout << "==============================================\n" << std::flush;
     
     // Validate model pointers
@@ -208,6 +208,8 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     
     // Atomic counters and flags
     std::atomic<int> games_completed{0};
+    std::atomic<int> optimal_moves{0};
+    std::atomic<int> eval_moves{0};
     std::atomic<int> model1_wins{0};
     std::atomic<int> model2_wins{0};
     std::atomic<int> draws{0};
@@ -234,12 +236,15 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
             this,
             i,
             games_per_worker,
-            &unified_queue,  // Same queue for both models
+            &unified_queue,
             board_size,
             mcts_simulations,
             exploration_factor,
             dirichlet_alpha,
             dirichlet_epsilon,
+            player_to_evaluate,
+            &optimal_moves,
+            &eval_moves,
             &games_completed,
             &model1_wins,
             &model2_wins,
@@ -306,6 +311,8 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     
     results.model1_winrate = (model1_score / total_games) * 100.0f;
     results.model2_winrate = (model2_score / total_games) * 100.0f;
+    results.eval_moves = eval_moves.load();
+    results.optimal_moves = optimal_moves.load();
     
     std::cout << "\n==============================================\n";
     std::cout << "[Evaluation] Evaluation Complete\n";
@@ -318,6 +325,9 @@ EvaluationResults SelfPlayManager::generate_evaluation_games(
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "[Evaluation] Model 1 win rate: " << results.model1_winrate << "%\n";
     std::cout << "[Evaluation] Model 2 win rate: " << results.model2_winrate << "%\n";
+    std::cout << "[Evaluation] Optimal moves: " << results.optimal_moves << "\n";
+    std::cout << "[Evaluation] Eval moves: " << results.eval_moves << "\n";
+    std::cout << "[Evaluation] Minimax Top 1 accuracy: " << (results.optimal_moves / results.eval_moves) << "\n";
     std::cout << "==============================================\n\n" << std::flush;
     
     return results;
@@ -332,21 +342,24 @@ void SelfPlayManager::evaluation_game_worker(
     double exploration_factor,
     float dirichlet_alpha,
     float dirichlet_epsilon,
+    Cell_state player_to_evaluate,
+    std::atomic<int>* optimal_moves,
+    std::atomic<int>* eval_moves,
     std::atomic<int>* games_completed,
     std::atomic<int>* model1_wins,
     std::atomic<int>* model2_wins,
     std::atomic<int>* draws) {
     
-    std::cout << "[EvalWorker " << worker_id << "] Starting (will play " << num_games << " games)\n" << std::flush;
+    // std::cout << "[EvalWorker " << worker_id << "] Starting (will play " << num_games << " games)\n" << std::flush;
     
     // Validate pointers
-    if (!queue || !games_completed || !model1_wins || !model2_wins || !draws) {
+    if (!queue || !games_completed || !model1_wins || !model2_wins || !draws || !optimal_moves || !eval_moves) {
         std::cerr << "[EvalWorker " << worker_id << "] ERROR: nullptr received!" << std::endl;
         return;
     }
     
     // Dummy dataset for evaluation
-    GameDataset dummy_dataset(100);
+    GameDataset dummy_dataset(20);
     
     for (int game_idx = 0; game_idx < num_games; ++game_idx) {
         try {
@@ -355,31 +368,33 @@ void SelfPlayManager::evaluation_game_worker(
                 exploration_factor,
                 mcts_simulations,
                 LogLevel::NONE,
-                0.0f,  // Deterministic for evaluation
+                0.0f, 
                 dirichlet_alpha,
-                dirichlet_epsilon,  // Should be 0.0 for evaluation
+                dirichlet_epsilon,  
                 queue,
                 -1,
                 false,
-                ModelID::MODEL_1);  // Tag for model 1
+                ModelID::MODEL_1); 
             
             auto player2 = std::make_unique<Mcts_player_selfplay>(
                 exploration_factor,
                 mcts_simulations,
                 LogLevel::NONE,
-                0.0f,  // Deterministic for evaluation
+                0.0f, 
                 dirichlet_alpha,
-                dirichlet_epsilon,  // Should be 0.0 for evaluation
+                dirichlet_epsilon, 
                 queue,
                 -1,
                 false,
-                ModelID::MODEL_2);  // Tag for model 2
+                ModelID::MODEL_2);
             
             // Create and play game (evaluation=true means don't save to dataset)
             Game game(board_size, std::move(player1), std::move(player2), 
-                     dummy_dataset, true);
+                     dummy_dataset, true, player_to_evaluate);
             
             Cell_state winner = game.play();
+            eval_moves->fetch_add(game.get_number_eval_moves(), std::memory_order_relaxed);
+            optimal_moves->fetch_add(game.get_number_optimal_moves(), std::memory_order_relaxed);
             
             // Update win counters
             if (winner == Cell_state::X) {
@@ -414,7 +429,7 @@ void SelfPlayManager::game_worker(
     float dirichlet_epsilon,
     std::atomic<int>* games_completed) {
     
-    std::cout << "[Worker " << worker_id << "] Starting (will play " << num_games << " games)\n" << std::flush;
+    // std::cout << "[Worker " << worker_id << "] Starting (will play " << num_games << " games)\n" << std::flush;
     
     if (!queue || !dataset || !games_completed) {
         std::cerr << "[Worker " << worker_id << "] ERROR: nullptr received!" << std::endl;
@@ -458,10 +473,10 @@ void SelfPlayManager::game_worker(
             
             int completed = games_completed->fetch_add(1, std::memory_order_release) + 1;
             
-            std::cout << "[Worker " << worker_id << "] Completed game " 
-                      << (game_idx + 1) << "/" << num_games 
-                      << ", winner: " << static_cast<int>(winner)
-                      << " (total games: " << completed << ")\n" << std::flush;
+            // std::cout << "[Worker " << worker_id << "] Completed game " 
+            //           << (game_idx + 1) << "/" << num_games 
+            //           << ", winner: " << static_cast<int>(winner)
+            //           << " (total games: " << completed << ")\n" << std::flush;
             
         } catch (const std::exception& e) {
             std::cerr << "[Worker " << worker_id << "] ERROR in game " 
@@ -476,5 +491,5 @@ void SelfPlayManager::game_worker(
                   << e.what() << std::endl;
     }
     
-    std::cout << "[Worker " << worker_id << "] Finished all games\n" << std::flush;
+    // std::cout << "[Worker " << worker_id << "] Finished all games\n" << std::flush;
 }

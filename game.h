@@ -8,6 +8,7 @@
 #include "player.h"
 #include "alphaz_model.h"
 
+
 /**
  * @class Game
  * @brief Represents a Tic Tac Toe game.
@@ -32,7 +33,7 @@ class Game {
    */
   Game(int board_size, std::unique_ptr<Player> player_1,
        std::unique_ptr<Player> player_2,
-       GameDataset& dataset, bool evaluation = false);
+       GameDataset& dataset, bool evaluation = false, Cell_state player_to_evaluate = Cell_state::Empty);
 
   /**
    * @brief Converts a move array to its string representation.
@@ -60,7 +61,11 @@ class Game {
    */
   Cell_state simple_play();
 
+  bool is_policy_optimal(const torch::Tensor& policy_logits, 
+                       const torch::Tensor& minimax_logits,
+                       const torch::Tensor& legal_mask);
 
+          
   /**
   * @brief Read-only access to the current board
   */
@@ -68,12 +73,24 @@ class Game {
         return board;
     }
 
+  float get_number_optimal_moves() const {
+    return optimal_moves;
+    }
+
+  float get_number_eval_moves() const {
+    return eval_moves;
+    }
+
  private:
   Board board;
   std::unique_ptr<Player> players[2];
+  std::unique_ptr<Player> minimax_agent = std::make_unique<Minimax_player>(16, true, LogLevel::NONE);
   int current_player_index;
   std::vector<torch::Tensor> result_z;
   bool evaluation = false;
+  Cell_state player_to_evaluate = Cell_state::Empty;
+  int optimal_moves;
+  int eval_moves;
 
   /**
    * @brief A cirular replay buffer

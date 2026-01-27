@@ -1,0 +1,3 @@
+[submodule "external/wandb-cpp"]
+	path = external/wandb-cpp
+	url = https://github.com/yhisaki/wandb-cpp.git

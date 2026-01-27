@@ -9,7 +9,7 @@
 #include "game.h"
 #include "alphaz_model.h"
 #include "game_dataset.h"
-
+#include "selfplay_manager.h"
 
 /**
  * @brief Checks if the input string is an integer.
@@ -163,7 +163,7 @@ void selfplay();
  * @brief Evaluate if the candidate model perform better than the best available, with the same MCTS 
  * seach parameters but guided by 2 differents models.
  */
-void evaluate(std::string eval_model_path, std::string last_model_path);
+std::pair<EvaluationResults, EvaluationResults> evaluate(std::string eval_model_path, std::string last_model_path);
 
 /**
  * @brief Clean old data training checkpoints.

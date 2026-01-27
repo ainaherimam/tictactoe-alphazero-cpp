@@ -9,32 +9,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # ============================================================
 # Allow user to specify build type: Debug or Release
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Debug)
-    message(STATUS "Build type not specified, defaulting to Debug")
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-
-# Debug flags for segfault diagnosis
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra -fno-omit-frame-pointer")
-    
-    # AddressSanitizer and UndefinedBehaviorSanitizer (optional but highly recommended)
-    # Uncomment these if your compiler supports them:
-    # set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined")
-    # set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined")
-    
-    message(STATUS "Debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
-endif()
-
-# Release flags for production
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-    message(STATUS "Release flags: ${CMAKE_CXX_FLAGS_RELEASE}")
-endif()
-
+# ============================================================
+# === Runtime Output Directory ===============================
+# ============================================================
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# ============================================================
+# === Torch (LibTorch) =======================================
+# ============================================================
 if(NOT DEFINED Torch_DIR AND DEFINED ENV{TORCH_HOME})
     set(Torch_DIR "$ENV{TORCH_HOME}/share/cmake/Torch")
 endif()
@@ -48,8 +33,6 @@ if(NOT Torch_FOUND)
         "  Option 2: Set environment variable TORCH_HOME=/path/to/libtorch\n"
         "Download from: https://pytorch.org/get-started/locally/")
 endif()
-
-message(STATUS "Torch found: ${TORCH_LIBRARIES}")
 
 # ============================================================
 # === Source files ===========================================
@@ -79,10 +62,6 @@ set(SOURCES
 # ============================================================
 add_executable(AlphaZero_TTT ${SOURCES})
 target_include_directories(AlphaZero_TTT PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-# ============================================================
-# === Link LibTorch ==========================================
-# ============================================================
 target_link_libraries(AlphaZero_TTT "${TORCH_LIBRARIES}")
 set_property(TARGET AlphaZero_TTT PROPERTY CXX_STANDARD 20)
 
@@ -107,7 +86,7 @@ if(MSVC)
 endif()
 
 # ============================================================
-# === Print Configuration Summary ===========================
+# === Configuration Summary =================================
 # ============================================================
 message(STATUS "")
 message(STATUS "=== Configuration Summary ===")
@@ -117,3 +96,4 @@ message(STATUS "Torch libraries: ${TORCH_LIBRARIES}")
 message(STATUS "Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "============================")
 message(STATUS "")
+

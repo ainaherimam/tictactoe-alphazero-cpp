@@ -139,7 +139,10 @@ void train(
     double lr,
     torch::Device device,
     int log_interval,
-    bool detailed_logging
+    bool detailed_logging,
+    int current_iteration,
+    int global_step,
+    MetricsLogger& logger
 ) {
     model->to(device);
     model->train();
@@ -159,6 +162,11 @@ void train(
     double total_policy_loss = 0.0;
     double total_value_loss = 0.0;
     double total_loss = 0.0;
+    double total_policy_entropy = 0.0;
+    double total_value_accuracy = 0.0;
+    double max_gradient_norm = 0.0;
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
     
     for (int step = 1; step <= training_steps; ++step) {
         std::vector<torch::Tensor> states, targets;
@@ -173,6 +181,7 @@ void train(
         
         auto b = torch::stack(states).to(device);
         auto t = torch::stack(targets).to(device);
+        
         auto pi_target = t.slice(1, 0, 16);
         auto z_target  = t.slice(1, 16, 17).squeeze(1);
         auto mask      = t.slice(1, 17, t.size(1));
@@ -185,17 +194,26 @@ void train(
         auto value_loss_tensor = torch::mse_loss(v, z_target);
         auto total_loss_tensor = policy_loss_tensor + value_loss_tensor;
         
+        // Additional metrics for better monitoring
+        auto policy_entropy = -(p * torch::log(p + 1e-8)).sum(1).mean();
+        auto value_accuracy = (torch::abs(v - z_target) < 0.4).to(torch::kFloat).mean();
+        auto sign_accuracy = ((v * z_target) > 0).to(torch::kFloat).mean();
+        
+        total_policy_entropy += policy_entropy.item<double>();
+        total_value_accuracy += value_accuracy.item<double>();
+        
         // Backward pass
         total_loss_tensor.backward();
         
-        // Optional: Gradient clipping for stability
-        torch::nn::utils::clip_grad_norm_(model->parameters(), 1.0);
+        // Gradient clipping for stability
+        double grad_norm = torch::nn::utils::clip_grad_norm_(model->parameters(), 1.0);
+        max_gradient_norm = std::max(max_gradient_norm, grad_norm);
         
         optimizer.step();
+        
         // Update learning rate using cosine annealing
         double current_lr = min_lr + (initial_lr - min_lr) * 
                            (1 + std::cos(M_PI * step / training_steps)) / 2.0;
-        
         for (auto& param_group : optimizer.param_groups()) {
             static_cast<torch::optim::AdamOptions&>(param_group.options()).lr(current_lr);
         }
@@ -204,36 +222,70 @@ void train(
         total_value_loss += value_loss_tensor.item<double>();
         total_loss += total_loss_tensor.item<double>();
         
-        if (step % log_interval == 0) {
+        if (step % 1 == 0) {
+            auto current_time = std::chrono::high_resolution_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                current_time - start_time).count();
+            
             double avg_policy_loss = total_policy_loss / log_interval;
             double avg_value_loss = total_value_loss / log_interval;
             double avg_total_loss = total_loss / log_interval;
+            double avg_policy_entropy = total_policy_entropy / log_interval;
+            double avg_value_accuracy = total_value_accuracy / log_interval;
+            
+            // Calculate training throughput
+            double samples_per_sec = (step * batch_size) / static_cast<double>(std::max(elapsed, 1L));
             
             // Get current learning rate
-            double current_lr = 0.0;
+            double lr_value = 0.0;
             for (const auto& group : optimizer.param_groups()) {
-                current_lr = group.options().get_lr();
+                lr_value = group.options().get_lr();
                 break;
             }
             
+            // Console logging
             if (detailed_logging) {
                 std::cout << "Step " << step << "/" << training_steps 
                           << " | Total Loss: " << std::fixed << std::setprecision(4) << avg_total_loss
                           << " | Policy Loss: " << avg_policy_loss
                           << " | Value Loss: " << avg_value_loss
-                          << " | LR: " << std::scientific << std::setprecision(2) << current_lr
+                          << " | Entropy: " << avg_policy_entropy
+                          << " | V-Acc: " << std::setprecision(3) << value_accuracy.item<double>()
+                          << " | WinnerPred- Accuracy: " << std::setprecision(3) << sign_accuracy.item<double>()
+                          << " | LR: " << std::scientific << std::setprecision(2) << lr_value
+                          << " | GradNorm: " << std::fixed << std::setprecision(3) << max_gradient_norm
                           << std::endl;
             } else {
                 std::cout << "Step " << step << "/" << training_steps 
                           << " | Loss: " << std::fixed << std::setprecision(4) << avg_total_loss
-                          << " | LR: " << std::scientific << std::setprecision(2) << current_lr
+                          << " | LR: " << std::scientific << std::setprecision(2) << lr_value
                           << std::endl;
             }
+            
+            // Log to CSV for W&B upload
+            int current_global_step = global_step + step;
+            
+            logger.add_scalar("global_step", current_global_step);
+            logger.add_scalar("iteration", current_iteration);
+            logger.add_scalar("training_step", step);
+            logger.add_scalar("training/total_loss", total_loss_tensor.item<double>());
+            logger.add_scalar("training/policy_loss", policy_loss_tensor.item<double>());
+            logger.add_scalar("training/value_loss", value_loss_tensor.item<double>());
+            logger.add_scalar("training/policy_entropy", policy_entropy.item<double>());
+            logger.add_scalar("training/value_accuracy", value_accuracy.item<double>());
+            logger.add_scalar("training/learning_rate", lr_value);
+            logger.add_scalar("training/gradient_norm", max_gradient_norm);
+            logger.add_scalar("training/samples_per_sec", samples_per_sec);
+            logger.add_scalar("training/sign_accuracy", sign_accuracy.item<double>());
+            logger.flush_metrics();
             
             // Reset accumulators
             total_policy_loss = 0.0;
             total_value_loss = 0.0;
             total_loss = 0.0;
+            total_policy_entropy = 0.0;
+            total_value_accuracy = 0.0;
+            max_gradient_norm = 0.0;
         }
     }
     

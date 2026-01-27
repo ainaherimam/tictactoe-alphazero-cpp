@@ -166,6 +166,11 @@ public:
      */
     friend std::ostream& operator<<(std::ostream& os, const Board& board);
 
+    Cell_state get(int x, int y) const {
+        return board[x][y];
+    }
+
+
 private:
     /**
      * @brief The size of the board

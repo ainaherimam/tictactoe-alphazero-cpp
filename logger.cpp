@@ -166,12 +166,13 @@ void Logger::log_root_stats(int visit_count, size_t child_nodes) {
 
 void Logger::log_child_node_stats(const std::array<int, 4>& move,
                                   float acc_value, int visit_count, 
-                                  float prior_proba) {
+                                  float prior_proba, float nn_value) {
     if (should_log(LogLevel::ROOT_STATS)) {
         std::ostringstream message;
         message << "  " << print_move(move)
                 << " | Visits: " << visit_count
                 << " | Prior: " << std::fixed << std::setprecision(2) << prior_proba
+                << " | NN Value: " << std::fixed << std::setprecision(2) << -nn_value
                 << " | Mean Value: " << std::setprecision(2) << acc_value/visit_count
                 << " | Acc Value: " << std::setprecision(2) << acc_value;
         log(message.str());

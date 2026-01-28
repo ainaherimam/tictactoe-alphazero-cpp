@@ -81,6 +81,15 @@ class Game {
     return eval_moves;
     }
 
+  void log_game(const std::string& event_name, 
+                    const std::string& p1_name, 
+                    const std::string& p2_name,
+                    Cell_state winner,
+                    std::string move_history);
+
+
+  
+
  private:
   Board board;
   std::unique_ptr<Player> players[2];
@@ -91,6 +100,7 @@ class Game {
   Cell_state player_to_evaluate = Cell_state::Empty;
   int optimal_moves;
   int eval_moves;
+  std::string move_history;
 
   /**
    * @brief A cirular replay buffer
@@ -110,6 +120,7 @@ class Game {
    * @param random_move_number Number of random moves to perform.
    */
   void random_move(int random_move_number);
+
 };
 
 #endif

@@ -1,11 +1,9 @@
 #include "game.h"
-#include "logger.h"
+#include <ostream>
+#include <string>
+#include <string>
 #include <torch/torch.h>
-#include <chrono>
-#include "alphaz_model.h"
 #include <vector>
-#include <algorithm>
-#include <map>
 #include <set>
 #include <iostream>
 #include <random>
@@ -22,6 +20,8 @@ Game::Game(int board_size, std::unique_ptr<Player> player1,
   result_z.clear();
   optimal_moves = 0;
   eval_moves = 0;
+
+
 }
 
 Cell_state Game::play() {
@@ -74,6 +74,8 @@ Cell_state Game::play() {
 
             dataset_.add_position(board_tensor, pi_tensor, z_tensor, mask_tensor);
         }
+        // I can use std::format if g++ > 13, on debian its 12.2
+
 
         //TOP 1 ACCURACY
         else if (evaluation && move_counter >= 4 && current_player==player_to_evaluate) {
@@ -86,6 +88,14 @@ Cell_state Game::play() {
                 optimal_moves++;
             }
         }
+
+        //update the move_history
+        move_history += std::to_string(move_counter + 1) + "." 
+           + char('0' + (3 - chosen_move[1])) 
+           + char('a' + chosen_move[2]) 
+           + " ";
+        
+        std::cout << move_history << std::endl;
 
         int chosen_x = chosen_move[0];
         int chosen_y = chosen_move[1];
@@ -103,7 +113,18 @@ Cell_state Game::play() {
     if (!evaluation){
         dataset_.update_z(result_z, winner);
     }
-    // board.display_board(std::cout);
+    board.display_board(std::cout);
+
+    std::string p1_name = "Player 1";
+    std::string p2_name = "Player 2";
+
+
+    log_game("AZ Selfplay", 
+                    p1_name, 
+                    p2_name,
+                    winner,
+                    move_history);
+
     return winner;
 }
 
@@ -128,6 +149,13 @@ Cell_state Game::simple_play() {
         
         auto [chosen_move, logits] = players[current_player_index]->choose_move(board, current_player);
 
+        move_history += std::to_string(move_counter + 1) + "." 
+           + char('0' + (3 - chosen_move[1])) 
+           + char('a' + chosen_move[2]) 
+           + " ";
+        
+        std::cout << move_history << std::endl;
+
         int chosen_x = chosen_move[0];
         int chosen_y = chosen_move[1];
         int chosen_dir = chosen_move[2];
@@ -142,6 +170,13 @@ Cell_state Game::simple_play() {
         move_counter ++;
     }
     Cell_state winner = board.check_winner();
+
+    const std::string p1_name = "Player 1";
+    const std::string p2_name = "Player 2";
+
+
+    log_game("AZ Selfplay",p1_name, p2_name,winner,move_history);
+
 
     board.display_board(std::cout);
     std::cout << "Player " << winner << " wins!" << std::endl;
@@ -260,23 +295,54 @@ bool Game::is_policy_optimal(const torch::Tensor& policy_logits,
         }
     }
     
-    // // Print policy's top-1 move(s)
-    // std::cout << "Policy Top-1 Move(s) (score: " << policy_max_score << "): ";
-    // for (const auto& [x, y] : policy_optimal_moves) {
-    //     std::cout << "(" << x << "," << y << ") ";
-    // }
-    // std::cout << "\n";
-    
-    // // Print minimax's optimal move(s)
-    // std::cout << "Minimax Optimal Move(s) (score: " << minimax_max_score << "): ";
-    // for (const auto& [x, y] : minimax_optimal_moves) {
-    //     std::cout << "(" << x << "," << y << ") ";
-    // }
-    // std::cout << "\n";
-    
-    // // Check if policy's top-1 is in minimax's optimal set
     bool is_optimal = minimax_optimal_moves.count({policy_x, policy_y}) > 0;
-    // std::cout << "Policy chose optimal: " << (is_optimal ? "YES" : "NO") << "\n\n";
     
     return is_optimal;
+}
+
+void Game::log_game(const std::string& event_name, 
+                    const std::string& p1_name, 
+                    const std::string& p2_name,
+                    Cell_state winner,
+                    std::string move_history) {
+    // Get current timestamp
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    
+    std::tm* local_time = std::localtime(&time_t_now);
+    std::string result =
+    (winner == Cell_state::X) ? "1-0" :
+    (winner == Cell_state::O) ? "0-1" :
+                               "1/2-1/2";
+
+    
+    // Format: YYYY.MM.DD-HH.MM.SS
+    std::ostringstream timestamp;
+    timestamp << std::setfill('0')
+              << std::setw(4) << (local_time->tm_year + 1900) << "."
+              << std::setw(2) << (local_time->tm_mon + 1) << "."
+              << std::setw(2) << local_time->tm_mday << "-"
+              << std::setw(2) << local_time->tm_hour << "."
+              << std::setw(2) << local_time->tm_min << "."
+              << std::setw(2) << local_time->tm_sec;
+    
+    // Build the log content
+    std::string game_log;
+    game_log = "[Event \"" + event_name + "\"]\n";
+    game_log += "[Date \"" + timestamp.str() + "\"]\n";
+    game_log += "[X \"" + p1_name + "\"]\n";
+    game_log += "[O \"" + p2_name + "\"]\n";
+    game_log += result + "\n";
+    game_log += "\n" + move_history + "";
+    
+    
+    // Create filename: event_name_YYYY.MM.DD-HH.MM.SS.pgn
+    std::string filename = event_name + "_" + timestamp.str() + ".pgn";
+    
+    // Save to file
+    std::ofstream outfile(filename);
+    if (outfile.is_open()) {
+        outfile << game_log;
+        outfile.close();
+    }
 }

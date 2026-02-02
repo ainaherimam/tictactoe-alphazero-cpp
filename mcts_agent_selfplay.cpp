@@ -1,17 +1,14 @@
-﻿#include <torch/torch.h>
-
-#include <cassert>
-#include <chrono>
+﻿#include <cassert>
 #include <cmath>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <random>
-
-
+#include <vector>
 #include "mcts_agent_selfplay.h"
-#include "inference_queue.h"
 #include "logger.h"
+#include "board.h"
+#include "constants.h"
+#include "board.h"
 
 
 
@@ -21,24 +18,24 @@ Mcts_agent_selfplay::Mcts_agent_selfplay(double exploration_factor,
                          float temperature,
                          float dirichlet_alpha,
                          float dirichlet_epsilon,
-                         InferenceQueue* inference_queue,
+                         std::shared_ptr<InferenceClient> client,
                          int max_depth,
                          bool tree_reuse,
-                         ModelID model_id)
+                         uint32_t model_id)
     : exploration_factor(exploration_factor),
       number_iteration(number_iteration),
       logger(Logger::instance(log_level)),
       temperature(temperature),
       dirichlet_alpha(dirichlet_alpha),
       dirichlet_epsilon(dirichlet_epsilon),
-      inference_queue(inference_queue),
+      client(client),
       max_depth(max_depth),
       random_generator(std::random_device{}()),
       tree_reuse(tree_reuse),
       model_id(model_id) {
       }
 
-Mcts_agent_selfplay::Node::Node(Cell_state player, std::array<int, 4> move, float prior_proba, float value_from_nn,
+Mcts_agent_selfplay::Node::Node(Cell_state player, Move move, float prior_proba, float value_from_nn,
                        std::shared_ptr<Node> parent_node)
     : value_from_nn(value_from_nn),
       value_from_mcts(0.0f),
@@ -72,12 +69,13 @@ std::vector<float> Mcts_agent_selfplay::generate_dirichlet_noise(int num_moves, 
 }
 
 
-std::pair<std::array<int, 4>, torch::Tensor> Mcts_agent_selfplay::choose_move(const Board& board, Cell_state player) {
+std::pair<Move, std::vector<float>> Mcts_agent_selfplay::choose_move(const Board& board, Cell_state player) {
+
 
     logger->log_mcts_start(player);
     // // Create a new root node and expand it
-    std::array<int, 4> arr = {-1, -1, -1, -1};
-    root = std::make_shared<Node>(player, arr, 0.0, 0.0, nullptr);
+    Move dummy = {-1, -1, -1, -1};
+    root = std::make_shared<Node>(player, dummy, 0.0, 0.0, nullptr);
 
     // Initialize root with Dirichlet noise for exploration
     initiate_and_run_nn(root, board, true, dirichlet_alpha, dirichlet_epsilon);
@@ -100,29 +98,37 @@ std::pair<std::array<int, 4>, torch::Tensor> Mcts_agent_selfplay::choose_move(co
         float avg_value = (child->visit_count > 0) ? 
                             child->acc_value / child->visit_count : 0.0f;
         logger->log_child_node_stats(child->move, child->acc_value,
-                                        child->visit_count, child->prior_proba);
+                                        child->visit_count, child->prior_proba, child->value_from_nn);
     }
-
+    // std::cout << "policu from mcts" << best_child->move[0]<<"," << best_child->move[1] <<"\n";
     return {best_child->move, policy_from_mcts};
 }
 
 float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node, const Board& board,
                                       bool add_dirichlet_noise = false, float dirichlet_alpha = 0.4,
                                       float exploration_fraction = 0.25) {
+
+
     Cell_state current_player = node->player;
     Cell_state actual_player = node->player;
-
-    torch::Tensor input = board.to_tensor(current_player);
-    torch::Tensor legal_mask = board.get_legal_mask(current_player);
     
-    auto [policy, value] = inference_queue->evaluate_and_wait(input, legal_mask, model_id);
-
-    std::vector<std::pair<std::array<int, 4>, float>> move_with_logit = get_moves_with_probs(policy);
     
-    //Dive deeper
-    logger->log_nn_evaluation(node->move, value.item<float>(), move_with_logit.size());
+    float input[INPUT_PLANES * X_ * Y_ ];
+    float mask[POLICY_SIZE];
+    float policy[POLICY_SIZE];
+    float value;
 
+    board.to_float_array(current_player, input);
+    board.get_legal_mask(current_player, mask);
+
+    client->evaluate_and_wait(input, mask, policy, &value);
+    
+    std::vector<std::pair<Move, float>> move_with_logit = get_moves_with_probs(policy);
+
+
+    logger->log_nn_evaluation(node->move, value, move_with_logit.size());
     std::vector<float> noise;
+    
     if (add_dirichlet_noise && !move_with_logit.empty()) {
         noise = generate_dirichlet_noise(move_with_logit.size(), dirichlet_alpha);
 
@@ -137,28 +143,28 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
     // For each valid move, initialize a new child node
     int idx = 0;
     for (const auto& [move, logit] : move_with_logit) {
-        if (move[3] < 1) {
+        if (move.tar < 1) {
             actual_player = (current_player == Cell_state::X ? Cell_state::O : Cell_state::X);
         } else {
             actual_player = current_player;
         }
 
         std::shared_ptr<Node> new_child =
-            std::make_shared<Node>(actual_player, std::array<int, 4>(move), logit, 0.0, node);
+            std::make_shared<Node>(actual_player, move, logit, 0.0, node);
         node->child_nodes.push_back(new_child);
         idx++;
     }
 
     logger->log_expansion(node->move, node->child_nodes.size());
-    node->value_from_nn = value.item<float>();
+    node->value_from_nn = value;
     node->expanded = true;
 
-    return value.item<float>();
+    return value;
 }
 
 
 void Mcts_agent_selfplay::perform_mcts_iterations(int number_iteration, int& mcts_iteration_counter, const Board& board) {
-    int count = 0;
+
     while (mcts_iteration_counter < number_iteration) {
         logger->log_iteration_number(mcts_iteration_counter + 1);
 
@@ -173,25 +179,23 @@ void Mcts_agent_selfplay::perform_mcts_iterations(int number_iteration, int& mct
         
         logger->log_step("FINAL STATS", chosen_child->move);
         for (const auto& child : root->child_nodes) {
-            logger->log_child_node_stats(child->move, child->acc_value, child->visit_count, child->prior_proba);
+            logger->log_child_node_stats(child->move, child->acc_value,
+                                        child->visit_count, child->prior_proba, child->value_from_nn);
         }
         mcts_iteration_counter++;
     }
 }
 
-std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, torch::Tensor> Mcts_agent_selfplay::sample_child_and_get_policy(
+std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, std::vector<float>> Mcts_agent_selfplay::sample_child_and_get_policy(
     const std::shared_ptr<Node>& parent_node) const {
     
-    const int X = 4;
-    const int Y = 4;
-    const int DIR = 1;
-    const int TAR = 1; 
-    const int total_size = X * Y * DIR * TAR;
+
+    const int total_size = X_ * Y_ * DIR_ * TAR_;
     
     auto index = [&](int x, int y, int dir, int tar) -> int {
         int dir_idx = dir - 1; 
         int tar_idx = tar + 1; 
-        return x * (Y * DIR * TAR) + y * (DIR * TAR) + dir_idx * TAR + tar_idx;
+        return x * (Y_ * DIR_ * TAR_) + y * (DIR_ * TAR_) + dir_idx * TAR_ + tar_idx;
     };
     
     const auto& children = parent_node->child_nodes;
@@ -213,11 +217,11 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, torch::Tensor> Mcts_agent_
             if (child->visit_count > max_visits) {
                 max_visits = child->visit_count;
                 best_child = child;
-                best_idx = index(child->move[0], child->move[1], child->move[2], child->move[3]);
+                best_idx = index(child->move.x, child->move.y, child->move.dir, child->move.tar);
             }
         }
         
-        torch::Tensor policy = torch::zeros({total_size}, torch::kFloat32);
+        std::vector<float> policy(total_size, 0.0f);
         policy[best_idx] = 1.0f;
         
         return {best_child, policy};
@@ -226,7 +230,7 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, torch::Tensor> Mcts_agent_
     // Temperature > 0
     float sum = 0.0f;
     for (const auto& child : children) {
-        int idx = index(child->move[0], child->move[1], child->move[2], child->move[3]);
+        int idx = index(child->move.x, child->move.y, child->move.dir, child->move.tar);
         float adjusted = std::pow(static_cast<float>(child->visit_count), 1.0f / temperature);
         
         legal_indices.push_back(idx);
@@ -235,15 +239,14 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, torch::Tensor> Mcts_agent_
     }
     
     // Normalize
-    torch::Tensor policy = torch::zeros({total_size}, torch::kFloat32);
-    auto policy_acc = policy.accessor<float, 1>();
+    std::vector<float> policy(total_size, 0.0f);
     
     float inv_sum = 1.0f / sum;
     for (int i = 0; i < num_legal_moves; ++i) {
-        policy_acc[legal_indices[i]] = adjusted_visits[i] * inv_sum;
+        policy[legal_indices[i]] = adjusted_visits[i] * inv_sum;
     }
     
-    // Sample from legal moves only
+    // Sample from legal moves only ??????????????????
     std::random_device rd;
     std::mt19937 gen(rd());
     std::discrete_distribution<> dist(adjusted_visits.begin(), adjusted_visits.end());
@@ -252,35 +255,31 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, torch::Tensor> Mcts_agent_
     return {children[selected_child_idx], policy};
 }
 
-std::vector<std::pair<std::array<int, 4>, float>> Mcts_agent_selfplay::get_moves_with_probs(
-    const torch::Tensor& log_probs_tensor) const {
-    const int X = 4;
-    const int Y = 4;
-    const int DIR = 1;
-    const int TAR = 1;
-    const int total = X * Y * DIR * TAR;
+std::vector<std::pair<Move, float>> Mcts_agent_selfplay::get_moves_with_probs(
+    const float* probs) const {
 
-    torch::Tensor probs = torch::exp(log_probs_tensor).to(torch::kCPU).contiguous().view({total});
-    const float* data = probs.data_ptr<float>();
+    const int total = X_ * Y_ * DIR_ * TAR_;
 
-    std::vector<std::pair<std::array<int, 4>, float>> moves;
+    std::vector<std::pair< Move, float>> moves;
     moves.reserve(total);
 
     float sum = 0.0f;
 
     for (int idx = 0; idx < total; idx++) {
-        float p = data[idx];
-        if (p <= 0.0f) continue;
+        float p = probs[idx];
+        if (p <= 0.0f){
+            continue;
+        } 
 
         int t = idx;
-        int x = t / (Y * DIR * TAR);
-        t %= (Y * DIR * TAR);
-        int y = t / (DIR * TAR);
-        t %= (DIR * TAR);
-        int dir = (t / TAR) + 1;
-        int tar = (t % TAR) - 1;
+        int x = t / (Y_ * DIR_ * TAR_);
+        t %= (Y_ * DIR_ * TAR_);
+        int y = t / (DIR_ * TAR_);
+        t %= (DIR_ * TAR_);
+        int dir = (t / TAR_) + 1;
+        int tar = (t % TAR_) - 1;
 
-        std::array<int, 4> move = {x, y, dir, tar};
+        Move move = {x, y, dir, tar};
         moves.emplace_back(move, p);
         sum += p;
     }
@@ -320,13 +319,11 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, Board> Mcts_agent_selfplay
         logger->log_selected_child(best_child->move, max_score);
 
         // Apply move
-        board.make_move(best_child->move[0], best_child->move[1], best_child->move[2], best_child->move[3],
-                        current_player);
+        board.make_move(best_child->move,current_player);
 
-        if (best_child->move[3] < 1) {
+        if (best_child->move.tar < 1) {
             // Switch player
             current_player = (current_player == Cell_state::X ? Cell_state::O : Cell_state::X);
-            board.clear_state();
         }
 
         current = best_child;

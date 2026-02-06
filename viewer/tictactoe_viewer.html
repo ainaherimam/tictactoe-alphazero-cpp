@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4x4 Misere TicTacToe Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 25px;
+        }
+
+        .controls {
+            margin-bottom: 25px;
+        }
+
+        .load-section {
+            margin-bottom: 20px;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 12px 20px;
+            background: #667eea;
+            color: white;
+            text-align: center;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-weight: 500;
+        }
+
+        .file-input-label:hover {
+            background: #5568d3;
+        }
+
+        .game-selector {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .game-selector label {
+            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .game-selector input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            transition: border-color 0.3s;
+        }
+
+        .game-selector input:hover {
+            border-color: #667eea;
+        }
+
+        .game-selector input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .game-selector span {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin: 25px auto;
+            max-width: 400px;
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 12px;
+        }
+
+        .cell {
+            aspect-ratio: 1;
+            background: white;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 32px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .cell.x {
+            color: #667eea;
+        }
+
+        .cell.o {
+            color: #764ba2;
+        }
+
+        .cell.highlight {
+            background: #fff9c4;
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .cell-label {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-size: 10px;
+            color: #999;
+            font-weight: normal;
+        }
+
+        .navigation {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .nav-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.3s;
+            min-width: 45px;
+        }
+
+        .nav-btn:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .nav-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .move-display {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .info-panel {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .info-label {
+            color: #666;
+        }
+
+        .info-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .no-games {
+            text-align: center;
+            color: #999;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+
+        .result {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .result.win-x {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .result.win-o {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #f9f9f9;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .bar-chart {
+            margin-top: 15px;
+        }
+
+        .bar-item {
+            margin-bottom: 12px;
+        }
+
+        .bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 5px;
+            color: #666;
+        }
+
+        .bar-bg {
+            background: #e0e0e0;
+            border-radius: 4px;
+            height: 24px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 8px;
+            color: white;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .bar-fill.x-color {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .bar-fill.o-color {
+            background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .bar-fill.draw-color {
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .histogram {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-around;
+            height: 150px;
+            margin-top: 15px;
+            gap: 8px;
+        }
+
+        .histogram-bar {
+            flex: 1;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px 4px 0 0;
+            position: relative;
+            transition: all 0.3s;
+            min-height: 2px;
+        }
+
+        .histogram-bar:hover {
+            opacity: 0.8;
+            transform: translateY(-2px);
+        }
+
+        .histogram-label {
+            position: absolute;
+            bottom: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10px;
+            color: #666;
+        }
+
+        .histogram-value {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .pie-chart {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .pie-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+
+        .no-stats {
+            text-align: center;
+            color: #999;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+
+        .monitor-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 15px;
+            padding: 12px;
+            background: #f0f4ff;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .monitor-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-indicator.active {
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .monitor-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .monitor-controls input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        .monitor-controls input[type="number"] {
+            width: 60px;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .refresh-info {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .new-games-badge {
+            display: inline-block;
+            background: #4caf50;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.8); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 4×4 Misere TicTacToe Viewer</h1>
+        <p class="subtitle">Load PGN games and navigate through moves</p>
+
+        <div class="controls">
+            <div class="load-section">
+                <div class="file-input-wrapper">
+                    <input type="file" id="folderInput" webkitdirectory directory multiple accept=".pgn">
+                    <label for="folderInput" class="file-input-label">📁 Load Folder with PGN Files</label>
+                </div>
+            </div>
+
+            <div class="monitor-controls" id="monitorControls" style="display: none;">
+                <div class="monitor-status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <span id="statusText">Monitoring stopped</span>
+                </div>
+                <label>
+                    <input type="checkbox" id="autoMonitor" checked>
+                    Auto-refresh
+                </label>
+                <label>
+                    Every
+                    <input type="number" id="refreshInterval" min="1" max="60" value="3">
+                    sec
+                </label>
+                <div class="refresh-info" id="refreshInfo"></div>
+            </div>
+
+            <div class="game-selector">
+                <label for="gameNumber">Game #</label>
+                <input type="number" id="gameNumber" min="1" placeholder="Enter game number" disabled>
+                <span id="totalGames">of 0</span>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('viewer')">🎮 Game Viewer</button>
+            <button class="tab" onclick="switchTab('stats')">📊 Statistics</button>
+        </div>
+
+        <div id="viewerTab" class="tab-content active">
+            <div id="gameArea"></div>
+        </div>
+
+        <div id="statsTab" class="tab-content">
+            <div id="statsArea"></div>
+        </div>
+    </div>
+
+    <script>
+        // Game state
+        let games = [];
+        let currentGameIndex = -1;
+        let currentMoveIndex = 0;
+        let statistics = null;
+
+        // Monitoring state
+        let folderHandle = null;
+        let monitoringInterval = null;
+        let lastGameCount = 0;
+
+        // Board state
+        const board = Array(4).fill(null).map(() => Array(4).fill(null));
+
+        // Elements
+        const folderInput = document.getElementById('folderInput');
+        const gameNumber = document.getElementById('gameNumber');
+        const totalGames = document.getElementById('totalGames');
+        const gameArea = document.getElementById('gameArea');
+        const statsArea = document.getElementById('statsArea');
+        const monitorControls = document.getElementById('monitorControls');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const autoMonitor = document.getElementById('autoMonitor');
+        const refreshInterval = document.getElementById('refreshInterval');
+        const refreshInfo = document.getElementById('refreshInfo');
+
+        // Coordinate mapping (column-row format like "3c" = column 3, row c)
+        const rowMap = { 'a': 0, 'b': 1, 'c': 2, 'd': 3 };
+        const colLabels = ['1', '2', '3', '4'];
+        const rowLabels = ['a', 'b', 'c', 'd'];
+
+        function parseMove(moveStr) {
+            // Format: "3c" means column 3, row c
+            const col = parseInt(moveStr[0]) - 1;
+            const row = rowMap[moveStr[1]];
+            return { row, col };
+        }
+
+        function parsePGN(content, filename) {
+            const lines = content.trim().split('\n');
+            const game = {
+                filename: filename,
+                event: '',
+                playerX: '',
+                playerO: '',
+                result: '',
+                moves: []
+            };
+
+            lines.forEach(line => {
+                if (line.startsWith('[Event')) {
+                    game.event = line.match(/"(.+)"/)?.[1] || '';
+                } else if (line.startsWith('[X')) {
+                    game.playerX = line.match(/"(.+)"/)?.[1] || '';
+                } else if (line.startsWith('[O')) {
+                    game.playerO = line.match(/"(.+)"/)?.[1] || '';
+                } else if (line.match(/^[01]-[01]|^1\/2-1\/2$/)) {
+                    game.result = line;
+                } else if (line.match(/^\d+\./)) {
+                    const moveMatches = line.matchAll(/\d+\.(\w+)/g);
+                    for (const match of moveMatches) {
+                        game.moves.push(match[1]);
+                    }
+                }
+            });
+
+            return game;
+        }
+
+        function boardToString(boardState) {
+            return boardState.map(row => row.map(cell => cell || '.').join('')).join('');
+        }
+
+        function calculateStatistics() {
+            const stats = {
+                totalGames: games.length,
+                xWins: 0,
+                oWins: 0,
+                draws: 0,
+                totalMoves: 0,
+                gameLengths: [],
+                positions: new Set(),
+                boardRepetitions: {},
+                uniqueMoves: new Set(),
+                endingBoards: new Set()
+            };
+
+            games.forEach(game => {
+                // Win stats
+                if (game.result === '1-0') stats.xWins++;
+                else if (game.result === '0-1') stats.oWins++;
+                else if (game.result === '1/2-1/2') stats.draws++;
+
+                // Move stats
+                const moveCount = game.moves.length;
+                stats.totalMoves += moveCount;
+                stats.gameLengths.push(moveCount);
+
+                // Unique moves
+                game.moves.forEach(move => stats.uniqueMoves.add(move));
+
+                // Position tracking
+                const tempBoard = Array(4).fill(null).map(() => Array(4).fill(null));
+                game.moves.forEach((move, idx) => {
+                    const pos = parseMove(move);
+                    tempBoard[pos.row][pos.col] = idx % 2 === 0 ? 'X' : 'O';
+                    const boardStr = boardToString(tempBoard);
+                    stats.positions.add(boardStr);
+                    stats.boardRepetitions[boardStr] = (stats.boardRepetitions[boardStr] || 0) + 1;
+                });
+
+                // Ending board
+                stats.endingBoards.add(boardToString(tempBoard));
+            });
+
+            // Calculate percentages
+            stats.xWinPct = (stats.xWins / stats.totalGames * 100).toFixed(1);
+            stats.oWinPct = (stats.oWins / stats.totalGames * 100).toFixed(1);
+            stats.drawPct = (stats.draws / stats.totalGames * 100).toFixed(1);
+            stats.avgMoves = (stats.totalMoves / stats.totalGames).toFixed(1);
+
+            // Game length distribution
+            const lengthBuckets = {};
+            stats.gameLengths.forEach(len => {
+                lengthBuckets[len] = (lengthBuckets[len] || 0) + 1;
+            });
+            stats.lengthDistribution = lengthBuckets;
+
+            // Find repeated boards
+            stats.repeatedBoards = Object.values(stats.boardRepetitions).filter(count => count > 1).length;
+
+            return stats;
+        }
+
+        function renderStatistics() {
+            if (!statistics || games.length === 0) {
+                statsArea.innerHTML = '<div class="no-stats">📊 Load games to see statistics</div>';
+                return;
+            }
+
+            const s = statistics;
+            const maxCount = Math.max(...Object.values(s.lengthDistribution));
+
+            statsArea.innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Win Rates</h3>
+                        <div class="bar-chart">
+                            <div class="bar-item">
+                                <div class="bar-label">
+                                    <span>❌ Player 1 (X)</span>
+                                    <span>${s.xWins} games (${s.xWinPct}%)</span>
+                                </div>
+                                <div class="bar-bg">
+                                    <div class="bar-fill x-color" style="width: ${s.xWinPct}%">${s.xWinPct}%</div>
+                                </div>
+                            </div>
+                            <div class="bar-item">
+                                <div class="bar-label">
+                                    <span>⭕ Player 2 (O)</span>
+                                    <span>${s.oWins} games (${s.oWinPct}%)</span>
+                                </div>
+                                <div class="bar-bg">
+                                    <div class="bar-fill o-color" style="width: ${s.oWinPct}%">${s.oWinPct}%</div>
+                                </div>
+                            </div>
+                            <div class="bar-item">
+                                <div class="bar-label">
+                                    <span>🤝 Draws</span>
+                                    <span>${s.draws} games (${s.drawPct}%)</span>
+                                </div>
+                                <div class="bar-bg">
+                                    <div class="bar-fill draw-color" style="width: ${s.drawPct}%">${s.drawPct}%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h3>Average Game Length</h3>
+                        <div class="stat-value">${s.avgMoves}</div>
+                        <div class="stat-label">moves per game</div>
+                        <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                            <div>📊 Shortest: ${Math.min(...s.gameLengths)} moves</div>
+                            <div>📊 Longest: ${Math.max(...s.gameLengths)} moves</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h3>Unique Positions</h3>
+                        <div class="stat-value">${s.positions.size.toLocaleString()}</div>
+                        <div class="stat-label">distinct board states</div>
+                        <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                            <div>🔄 Repeated: ${s.repeatedBoards.toLocaleString()}</div>
+                            <div>📈 Avg per game: ${(s.positions.size / s.totalGames).toFixed(1)}</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h3>Move Repertoire</h3>
+                        <div class="stat-value">${s.uniqueMoves.size}</div>
+                        <div class="stat-label">unique moves played (out of 16 possible)</div>
+                        <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                            <div>📊 Coverage: ${(s.uniqueMoves.size / 16 * 100).toFixed(1)}%</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h3>Ending Board Diversity</h3>
+                        <div class="stat-value">${s.endingBoards.size}</div>
+                        <div class="stat-label">unique game endings</div>
+                        <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                            <div>📊 Diversity: ${(s.endingBoards.size / s.totalGames * 100).toFixed(1)}%</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h3>Game Length Distribution</h3>
+                        <div class="histogram">
+                            ${Object.keys(s.lengthDistribution).sort((a, b) => a - b).map(len => {
+                                const count = s.lengthDistribution[len];
+                                const height = (count / maxCount * 100);
+                                return `
+                                    <div class="histogram-bar" style="height: ${height}%">
+                                        <div class="histogram-value">${count}</div>
+                                        <div class="histogram-label">${len}m</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function switchTab(tab) {
+            const tabs = document.querySelectorAll('.tab');
+            const contents = document.querySelectorAll('.tab-content');
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            contents.forEach(c => c.classList.remove('active'));
+
+            if (tab === 'viewer') {
+                tabs[0].classList.add('active');
+                document.getElementById('viewerTab').classList.add('active');
+            } else {
+                tabs[1].classList.add('active');
+                document.getElementById('statsTab').classList.add('active');
+                renderStatistics();
+            }
+        }
+
+        async function loadGamesFromFiles(files) {
+            const pgnFiles = Array.from(files).filter(f => f.name.endsWith('.pgn'));
+            const newGames = [];
+            
+            for (const file of pgnFiles) {
+                const content = await file.text();
+                const game = parsePGN(content, file.name);
+                newGames.push(game);
+            }
+
+            return newGames;
+        }
+
+        async function refreshGames() {
+            if (!folderHandle) return;
+
+            try {
+                const files = [];
+                for await (const entry of folderHandle.values()) {
+                    if (entry.kind === 'file' && entry.name.endsWith('.pgn')) {
+                        const file = await entry.getFile();
+                        files.push(file);
+                    }
+                }
+
+                const newGames = await loadGamesFromFiles(files);
+                newGames.sort((a, b) => a.filename.localeCompare(b.filename));
+
+                const newCount = newGames.length;
+                const addedCount = newCount - lastGameCount;
+
+                if (addedCount > 0) {
+                    games = newGames;
+                    lastGameCount = newCount;
+
+                    // Update UI
+                    totalGames.textContent = `of ${games.length}`;
+                    gameNumber.max = games.length;
+                    
+                    // Recalculate statistics
+                    statistics = calculateStatistics();
+                    
+                    // Update refresh info
+                    const now = new Date();
+                    refreshInfo.innerHTML = `<span class="new-games-badge">+${addedCount} new</span> ${now.toLocaleTimeString()}`;
+                    
+                    // If on stats tab, refresh it
+                    if (document.getElementById('statsTab').classList.contains('active')) {
+                        renderStatistics();
+                    }
+
+                    // If viewing the last game, stay on the last game
+                    if (currentGameIndex === games.length - addedCount - 1) {
+                        // Keep current position
+                    } else if (currentGameIndex >= 0 && currentGameIndex < games.length) {
+                        // Refresh current game view
+                        renderGame();
+                    }
+                }
+
+                statusText.textContent = `Monitoring active (${games.length} games)`;
+                
+            } catch (error) {
+                console.error('Error refreshing games:', error);
+                statusText.textContent = 'Monitoring error';
+            }
+        }
+
+        function startMonitoring() {
+            if (monitoringInterval) return;
+
+            const interval = parseInt(refreshInterval.value) * 1000;
+            monitoringInterval = setInterval(refreshGames, interval);
+            
+            statusIndicator.classList.add('active');
+            statusText.textContent = `Monitoring active (${games.length} games)`;
+        }
+
+        function stopMonitoring() {
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+            }
+            
+            statusIndicator.classList.remove('active');
+            statusText.textContent = 'Monitoring stopped';
+        }
+
+        folderInput.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files).filter(f => f.name.endsWith('.pgn'));
+            
+            if (files.length === 0) {
+                alert('No PGN files found in the selected folder');
+                return;
+            }
+
+            // Store the directory handle for monitoring (Chrome/Edge only)
+            if (e.target.files[0].webkitRelativePath) {
+                // Try to get directory handle (File System Access API)
+                try {
+                    const dirHandle = await window.showDirectoryPicker();
+                    folderHandle = dirHandle;
+                } catch (err) {
+                    // User cancelled or API not available
+                    console.log('Directory handle not available:', err);
+                }
+            }
+
+            games = await loadGamesFromFiles(files);
+            games.sort((a, b) => a.filename.localeCompare(b.filename));
+
+            lastGameCount = games.length;
+            totalGames.textContent = `of ${games.length}`;
+            gameNumber.disabled = false;
+            gameNumber.max = games.length;
+            gameNumber.value = 1;
+            
+            currentGameIndex = 0;
+            statistics = calculateStatistics();
+            
+            // Show monitoring controls
+            monitorControls.style.display = 'flex';
+            
+            // Start monitoring if auto-monitor is enabled
+            if (autoMonitor.checked && folderHandle) {
+                startMonitoring();
+            } else if (!folderHandle) {
+                statusText.textContent = 'Manual refresh mode (re-select folder to enable auto-monitor)';
+                refreshInfo.innerHTML = '<span style="color: #ff9800;">⚠ Auto-refresh requires modern browser</span>';
+            }
+            
+            loadGame(0);
+        });
+
+        autoMonitor.addEventListener('change', (e) => {
+            if (e.target.checked && folderHandle) {
+                startMonitoring();
+            } else {
+                stopMonitoring();
+            }
+        });
+
+        refreshInterval.addEventListener('change', (e) => {
+            if (monitoringInterval) {
+                stopMonitoring();
+                if (autoMonitor.checked) {
+                    startMonitoring();
+                }
+            }
+        });
+
+        gameNumber.addEventListener('input', (e) => {
+            const num = parseInt(e.target.value);
+            if (num >= 1 && num <= games.length) {
+                loadGame(num - 1);
+            }
+        });
+
+        gameNumber.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.target.blur();
+            }
+        });
+
+        function loadGame(index) {
+            currentGameIndex = index;
+            currentMoveIndex = 0;
+            gameNumber.value = index + 1;
+            resetBoard();
+            renderGame();
+        }
+
+        function resetBoard() {
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    board[i][j] = null;
+                }
+            }
+        }
+
+        function applyMoves(count) {
+            resetBoard();
+            const game = games[currentGameIndex];
+            
+            for (let i = 0; i < count && i < game.moves.length; i++) {
+                const pos = parseMove(game.moves[i]);
+                board[pos.row][pos.col] = i % 2 === 0 ? 'X' : 'O';
+            }
+        }
+
+        function renderGame() {
+            if (currentGameIndex === -1 || games.length === 0) {
+                gameArea.innerHTML = '<div class="no-games">👆 Load a folder with PGN files to begin</div>';
+                return;
+            }
+
+            const game = games[currentGameIndex];
+            applyMoves(currentMoveIndex);
+
+            const resultClass = game.result === '1-0' ? 'win-x' : game.result === '0-1' ? 'win-o' : 'draw';
+            const resultText = game.result === '1-0' ? 'X Wins' : game.result === '0-1' ? 'O Wins' : 'Draw';
+
+            gameArea.innerHTML = `
+                <div class="board">
+                    ${board.map((row, i) => 
+                        row.map((cell, j) => {
+                            const cellLabel = `${colLabels[j]}${rowLabels[i]}`;
+                            const isLastMove = currentMoveIndex > 0 && 
+                                game.moves[currentMoveIndex - 1] === cellLabel;
+                            return `
+                                <div class="cell ${cell ? cell.toLowerCase() : ''} ${isLastMove ? 'highlight' : ''}">
+                                    <span class="cell-label">${cellLabel}</span>
+                                    ${cell || ''}
+                                </div>
+                            `;
+                        }).join('')
+                    ).join('')}
+                </div>
+
+                <div class="navigation">
+                    <button class="nav-btn" onclick="firstMove()" ${currentMoveIndex === 0 ? 'disabled' : ''}>⏮</button>
+                    <button class="nav-btn" onclick="prevMove()" ${currentMoveIndex === 0 ? 'disabled' : ''}>◀</button>
+                    <div class="move-display">Move ${currentMoveIndex}/${game.moves.length}</div>
+                    <button class="nav-btn" onclick="nextMove()" ${currentMoveIndex >= game.moves.length ? 'disabled' : ''}>▶</button>
+                    <button class="nav-btn" onclick="lastMove()" ${currentMoveIndex >= game.moves.length ? 'disabled' : ''}>⏭</button>
+                </div>
+
+                <div class="info-panel">
+                    <div class="info-row">
+                        <span class="info-label">Game:</span>
+                        <span class="info-value">${game.filename}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Event:</span>
+                        <span class="info-value">${game.event}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Result:</span>
+                        <span class="result ${resultClass}">${resultText} (${game.result})</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Current Move:</span>
+                        <span class="info-value">${currentMoveIndex > 0 ? game.moves[currentMoveIndex - 1] : '-'}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Next Move:</span>
+                        <span class="info-value">${currentMoveIndex < game.moves.length ? game.moves[currentMoveIndex] : '-'}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function firstMove() {
+            currentMoveIndex = 0;
+            renderGame();
+        }
+
+        function prevMove() {
+            if (currentMoveIndex > 0) {
+                currentMoveIndex--;
+                renderGame();
+            }
+        }
+
+        function nextMove() {
+            const game = games[currentGameIndex];
+            if (currentMoveIndex < game.moves.length) {
+                currentMoveIndex++;
+                renderGame();
+            }
+        }
+
+        function lastMove() {
+            const game = games[currentGameIndex];
+            currentMoveIndex = game.moves.length;
+            renderGame();
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (games.length === 0) return;
+            
+            // Only handle arrow keys if not in an input field
+            if (document.activeElement.tagName === 'INPUT') return;
+            
+            switch(e.key) {
+                case 'ArrowLeft':
+                    prevMove();
+                    break;
+                case 'ArrowRight':
+                    nextMove();
+                    break;
+                case 'Home':
+                    firstMove();
+                    break;
+                case 'End':
+                    lastMove();
+                    break;
+                case 'ArrowUp':
+                    if (currentGameIndex > 0) {
+                        loadGame(currentGameIndex - 1);
+                    }
+                    break;
+                case 'ArrowDown':
+                    if (currentGameIndex < games.length - 1) {
+                        loadGame(currentGameIndex + 1);
+                    }
+                    break;
+            }
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopMonitoring();
+        });
+
+        // Initial render
+        renderGame();
+        renderStatistics();
+    </script>
+</body>
+</html>

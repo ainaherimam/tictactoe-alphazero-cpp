@@ -16,8 +16,7 @@ Tic-Tac-Toe is a classic two-player strategy game played on a traditional 3x3 gr
 
 ## 🚀 Features
 - **Neural Network-Guided MCTS**: MCTS algorithm with neural network policy and value predictions
-- **Self-Play Training**: AlphaZero-style self-play loop
-- **Type of gameplay**: AI vs AI / Human vs Human / AI vs Human / Human vs Minimax
+- **Self-Play Training**: AlphaZero selfplay loop
 
 ---
 
@@ -26,7 +25,6 @@ Tic-Tac-Toe is a classic two-player strategy game played on a traditional 3x3 gr
 ## Prerequisites
 - **C++20 Compiler** (GCC 10+, Clang 10+, MSVC 2019+)
 - **CMake 3.20+**
-- **LibTorch** (PyTorch C++ API)
 
 ## Installation
 ```sh
@@ -37,7 +35,25 @@ git clone https://github.com/yourusername/tictactoe-alphazero-cpp.git && cd tict
 mkdir build && cd build
 
 # Configure and build
-cmake -DCMAKE_PREFIX_PATH=${LIBTORCH_PATH} ..
+cmake - ..
 make -j$(nproc)
 
+# 1. Create a virtual environment (if you don’t have one yet)
+python -m venv venv
+
+# 2. Activate it
+source venv/bin/activate   # Linux / macOS
+# venv\Scripts\activate    # Windows
+
+# 3. Upgrade pip
+python -m pip install --upgrade pip
+
+# 4. Install dependencies
+pip install -r requirements.txt
+
+# 5. Run inference server
+python inference_server.py
+
+# 6. Run selfplay
+python ./AlphaZero_TTT
 ---

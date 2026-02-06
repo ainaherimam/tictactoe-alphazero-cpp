@@ -38,22 +38,22 @@ mkdir build && cd build
 cmake - ..
 make -j$(nproc)
 
-# 1. Create a virtual environment (if you don’t have one yet)
+# Create a virtual environment (if you don’t have one yet)
 python -m venv venv
 
-# 2. Activate it
+# Activate it
 source venv/bin/activate   # Linux / macOS
 # venv\Scripts\activate    # Windows
 
-# 3. Upgrade pip
+# Upgrade pip
 python -m pip install --upgrade pip
 
-# 4. Install dependencies
+# Install dependencies
 pip install -r requirements.txt
 
-# 5. Run inference server
+# Run inference server
 python inference_server.py
 
-# 6. Run selfplay
+# Run selfplay
 python ./AlphaZero_TTT
 ---

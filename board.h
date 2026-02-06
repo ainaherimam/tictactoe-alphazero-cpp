@@ -2,212 +2,142 @@
 #define BOARD_H
 
 #include <array>
-#include <string>
-#include <utility>
+#include <iostream>
 #include <vector>
-
 #include "cell_state.h"
-#include <torch/torch.h>
 
 /**
- * @brief Tic Tac Toe board game implementation
- *
- *
- * The Board class provides functionality for managing and interacting with the
- * game board, including:
- *   - Initializing the board
- *   - Displaying the board in the console
- *   - Making a move on the board
- *   - Checking if there is a winner
- *
- * The board is represented internally as a 2D vector of Cell_state. The
- * Cell_state enum represents the state of a cell on the board (empty,X:occupied
- * by player 1,  or O: occupied by player 2).
+ * @struct Move
+ * @brief Represents a move on the board with position coordinates.
  */
-class Board {
-
-public:
-    /**
-     * @brief Constructor for Board class
-     *
-     * @param size Integer to set the size of the board
-     */
-    Board(int size);
+struct Move {
+    int x;   ///< Row coordinate (0-indexed)
+    int y;   ///< Column coordinate (0-indexed)
+    int dir; ///< Direction indicator (currently unused, set to -1)
+    int tar; ///< Target indicator (currently unused, set to -1)
 
     /**
-     * @brief Clear paths and all restricted moves from previous turn
+     * @brief Converts the move to a string format.
+     * @return String in format "(rowColumn)", e.g., "(1A)"
      */
-    void clear_state() {
-        path.clear();
-        restricted_move = {-1, -1};
+    std::string to_string() const {
+        char column = 'A' + y;
+        int row = x + 1;
+        return "(" + std::to_string(row) + column + ")";
     }
 
     /**
-     * @brief Getter for the size of the board
-     *
-     * @return The size of the board
+     * @brief Subscript operator for array-like access.
+     */
+    const int& operator[](size_t i) const {
+        return const_cast<Move&>(*this)[i];
+    }
+};
+
+/**
+ * @class Board
+ * @brief Represents a Tic-Tac-Toe game board (default to a 4x4 grid)
+ * 
+ * This class manages the game state, validates moves, and determines winners
+ * according to rules (can switch between Misere and Normal TTT).
+ */
+class Board {
+public:
+    /**
+     * @brief Constructs a new Board with the specified size.
+     * @param board_size Size of the board (default: 4 for 4x4 grid)
+     */
+    Board(int board_size = 4);
+    
+    /**
+     * @brief Gets the size of the board.
+     * @return The board size
      */
     int get_board_size() const;
-
+    
     /**
-     * @brief Checks if a given cell is within the bounds of the board
-     *
-     * @param move_x The x-coordinate of the cell
-     * @param move_y The y-coordinate of the cell
-     *
-     * @return True if the cell is within the bounds of the board, false otherwise
+     * @brief Checks if a move is within the board boundaries.
+     * @param move The move to validate
      */
-    bool is_within_bounds(int move_x, int move_y) const;
-
+    bool is_within_bounds(Move move) const;
+    
     /**
-     * @brief Print out a given vector of valid moves
-     *
-     * @param moves A vector of valid moves
+     * @brief Prints valid moves to standard output.
+     * @param moves Vector of moves to print
      */
-    void print_valid_moves(std::vector<std::array<int, 4>> moves) const;
-
+    void print_valid_moves(std::vector<Move> moves) const;
+    
     /**
-     * @brief Check if (x,y) is in the given vector
-     *
-     * @param x The x-coordinate of the cell
-     * @param y The y-coordinate of the cell
-     * @param vector A vector to search in
-     *
-     * @return True if (x,y) is in the vector, false otherwise
+     * @brief Gets all valid moves for the given player.
+     * @param player The player whose valid moves to find
+     * @return Vector of all valid moves (empty cells)
      */
-    bool is_in_vector(int x, int y, const std::vector<std::array<int, 2>>& vector) const;
-
+    std::vector<Move> get_valid_moves(Cell_state player) const;
+    
     /**
-     * @brief Get all valid moves available on the board for the given player
-     *
+     * @brief Executes a move on the board for the given player.
+     * @param move The move to make
+     * @param player The player making the move
+     */
+    void make_move(Move move, Cell_state player);
+    
+    /**
+     * @brief Converts the board state to a float array for data collection.
      * @param player The current player
-     *
-     * @return A vector containing all valid moves
+     * @param output Pointer to pre-allocated float array of size [3 * 4 * 4]
+     *               Plane 0: Current player's pieces
+     *               Plane 1: Opponent's pieces
+     *               Plane 2: Current player indicator (0 for X, 1 for O)
      */
-    std::vector<std::array<int, 4>> get_valid_moves(Cell_state player) const;
-
+    void to_float_array(Cell_state player, float* output) const;
+    
     /**
-     * @brief Place a piece on the board
-     *
-     * Updates the board state based on the specified move.
-     *
-     * @param move_x The x-coordinate of the cell
-     * @param move_y The y-coordinate of the cell
-     * @param dir The direction of the move (not used on TTT)
-     * @param tar The chosen target (not used on TTT)
-     * @param player The current player
-     */
-    void make_move(int move_x, int move_y, int dir, int tar, Cell_state player);
-
-    /**
-     * @brief Checks the winner
-     *
-     * @return The cell state of the winner
+     * @brief Checks for a winner based on rules.
+     * @return The winning player, or Empty if no winner
      */
     Cell_state check_winner() const;
-
-
+    
     /**
-     * @brief Converts the current board state to a tensor representation for data collection
-     *
-     * @param player The current player
-     *
-     * @return Tensor representation of the board state
+     * @brief Generates a legal move mask for data collection.
+     * @param player The player to generate the mask for
+     * @param output Pointer to pre-allocated float array of size [4 * 4 * 1 * 1]
+     *               1.0 indicates a legal move, 0.0 indicates illegal
      */
-    torch::Tensor to_tensor(Cell_state player) const;
-
+    void get_legal_mask(Cell_state player, float* output) const;
+    
     /**
-     * @brief Fill a given tensor with the tensor represenatation of the board for data collection
-     *
-     * @param player The current player
-     */
-    void fill_tensor(torch::Tensor& tensor, Cell_state player) const;
-
-    /**
-     * @brief Fill a given tensor with the mask of all legal and illegal moves of the board for data collection
-     *
-     * @param player The current player
-     *
-     * @return Tensor representation of the board state
-     */
-    void fill_mask(torch::Tensor& mask, Cell_state player) const;
-
-    /**
-     * @brief Adds the current board state to history
-     */
-    void add_history();
-
-    /**
-     * @brief Gets the legal move mask for the given player (useful for NN)
-     *
-     * @param player The current player
-     *
-     * @return Tensor representing the legal move mask (useful for NN)
-     */
-    torch::Tensor get_legal_mask(Cell_state player) const;
-
-    /**
-     * @brief Outputs the current state of the board to an output stream
-     *
-     * @param os The output stream to which the board state is to be printed
+     * @brief Displays the board to the specified output stream.
+     * @param os The output stream to write to
      */
     void display_board(std::ostream& os) const;
-
+    
     /**
-     * @brief Overloads the << operator for the Board class
-     *
-     * This function allows the board to be directly printed to an output stream
-     * (such as std::cout) by calling the display_board() method of the Board class.
-     *
-     * @param os The output stream to which the board state is to be printed
-     * @param board The board to be printed
-     *
-     * @return The output stream with the board state appended
+     * @brief Stream insertion operator for Board.
+     * @param os Output stream
+     * @param board Board to display
+     * @return Reference to the output stream
      */
     friend std::ostream& operator<<(std::ostream& os, const Board& board);
 
-    Cell_state get(int x, int y) const {
-        return board[x][y];
-    }
-
-
 private:
-    /**
-     * @brief The size of the board
-     */
-    int board_size;
+    const int board_size;                                    ///< Size of the board (rows and columns)
+    std::vector<std::vector<Cell_state>> empty_board;        ///< Template for an empty board
+    std::vector<std::vector<std::vector<Cell_state>>> history; ///< Game history (4 boards states for now)
+    std::vector<std::vector<Cell_state>> board;              ///< Current board state
 
     /**
-     * @brief A 2D vector representing the game board
-     *
-     * Each Cell_state signifies the state of a cell in the board - it can be
-     * either empty or occupied by one of the two players.
+     * @brief Adds the current board state to the game history.
      */
-    std::vector<std::vector<Cell_state>> board;
-
+    void add_history();
+    
     /**
-     * @brief A 2D vector representing an empty board template
-     *
-     * Each Cell_state signifies the state of a cell in the board - it can be
-     * either empty or occupied by one of the two players.
+     * @brief Helper to check if a position exists in a vector of coordinates.
+     * @param x Row 
+     * @param y Column
+     * @param vector Vector of pairs (x,y) to search
+     * @return true if position is found, false otherwise
      */
-    std::vector<std::vector<Cell_state>> empty_board;
-
-    /**
-     * @brief History of board states
-     */
-    std::vector<std::vector<std::vector<Cell_state>>> history;
-
-    /**
-     * @brief A restricted move that cannot be performed on the current turn
-     */
-    std::array<int, 2> restricted_move = {-1, -1};
-
-    /**
-     * @brief A vector containing all moves previously done by the current player
-     */
-    std::vector<std::array<int, 2>> path;
-
+    bool is_in_vector(int x, int y, const std::vector<std::array<int, 2>>& vector) const;
 };
 
 #endif

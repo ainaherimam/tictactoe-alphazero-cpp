@@ -1,4 +1,5 @@
 #include "logger.h"
+#include <cmath>
 
 // Initialize static member
 std::shared_ptr<Logger> Logger::logger = nullptr;
@@ -44,7 +45,7 @@ void Logger::log_iteration_number(int iteration_number) {
     }
 }
 
-void Logger::log_step(const std::string& step_name, const std::array<int, 4>& move) {
+void Logger::log_step(const std::string& step_name, const Move& move) {
     if (should_log(LogLevel::STEPS_ONLY)) {
       std::ostringstream message;
       if (move[0]<0){
@@ -58,7 +59,7 @@ void Logger::log_step(const std::string& step_name, const std::array<int, 4>& mo
     }
 }
 
-void Logger::log_nn_evaluation(const std::array<int, 4>& move, float value_from_nn, int num_legal_moves) {
+void Logger::log_nn_evaluation(const Move& move, float value_from_nn, int num_legal_moves) {
     if (should_log(LogLevel::STEPS_ONLY)) {
         std::ostringstream message;
         message << "[EVALUATION]" <<" Value from NN=" << std::fixed << std::setprecision(2) 
@@ -67,7 +68,7 @@ void Logger::log_nn_evaluation(const std::array<int, 4>& move, float value_from_
     }
 }
 
-void Logger::log_expansion(const std::array<int, 4>& move, int num_children) {
+void Logger::log_expansion(const Move& move, int num_children) {
     if (should_log(LogLevel::STEPS_ONLY)) {
         std::ostringstream message;
         message << "  Inititalized " << print_move(move) << " with " 
@@ -76,7 +77,7 @@ void Logger::log_expansion(const std::array<int, 4>& move, int num_children) {
     }
 }
 
-void Logger::log_selected_child(const std::array<int, 4>& move, double puct_score) {
+void Logger::log_selected_child(const Move& move, double puct_score) {
     if (should_log(LogLevel::SELECTION_ONLY)) {
         std::ostringstream message;
         message << "  Selected: " << print_move(move) << " | PUCT=";
@@ -89,7 +90,7 @@ void Logger::log_selected_child(const std::array<int, 4>& move, double puct_scor
     }
 }
 
-void Logger::log_puct_details(const std::array<int, 4>& move, float q_value, 
+void Logger::log_puct_details(const Move& move, float q_value, 
                               float u_value, float prior, int visits, int parent_visits) 
 {
     // Clamp NaN values
@@ -106,7 +107,7 @@ void Logger::log_puct_details(const std::array<int, 4>& move, float q_value,
     }
 }
 
-void Logger::log_simulation_start(const std::array<int, 4>& move, const Board& board) {
+void Logger::log_simulation_start(const Move& move, const Board& board) {
     if (should_log(LogLevel::EVERYTHING)) {
         std::ostringstream message;
         std::ostringstream board_string;
@@ -118,7 +119,7 @@ void Logger::log_simulation_start(const std::array<int, 4>& move, const Board& b
 }
 
 void Logger::log_simulation_step(Cell_state current_player, const Board& board,
-                                 const std::array<int, 4>& move) {
+                                 const Move& move) {
     if (should_log(LogLevel::EVERYTHING)) {
         std::ostringstream message;
         message << "    " << current_player << " plays " << print_move(move);
@@ -134,7 +135,7 @@ void Logger::log_simulation_end(float value) {
     }
 }
 
-void Logger::log_backpropagation_start(const std::array<int, 4>& move, float value) {
+void Logger::log_backpropagation_start(const Move& move, float value) {
     if (should_log(LogLevel::BACKPROP_ONLY)) {
         std::ostringstream message;
         message << "  Backprop value=" << std::fixed << std::setprecision(2) 
@@ -143,7 +144,7 @@ void Logger::log_backpropagation_start(const std::array<int, 4>& move, float val
     }
 }
 
-void Logger::log_backpropagation_result(const std::array<int, 4>& move,
+void Logger::log_backpropagation_result(const Move& move,
                                        float acc_value, int visit_count) {
     if (should_log(LogLevel::BACKPROP_ONLY)) {
         std::ostringstream message;
@@ -164,7 +165,7 @@ void Logger::log_root_stats(int visit_count, size_t child_nodes) {
     }
 }
 
-void Logger::log_child_node_stats(const std::array<int, 4>& move,
+void Logger::log_child_node_stats(const Move& move,
                                   float acc_value, int visit_count, 
                                   float prior_proba, float nn_value) {
     if (should_log(LogLevel::ROOT_STATS)) {
@@ -189,7 +190,7 @@ void Logger::log_timer_ran_out(int iteration_counter) {
 }
 
 void Logger::log_best_child_chosen(int iteration_counter,
-                                   const std::array<int, 4>& move,
+                                   const Move& move,
                                    float avg_value, int visits) {
     if (should_log(LogLevel::STEPS_ONLY)) {
         std::ostringstream message;
@@ -212,7 +213,7 @@ void Logger::log_dirichlet_noise_applied(float alpha, float exploration_fraction
     }
 }
 
-std::string Logger::print_move(std::array<int, 4> move) {
+std::string Logger::print_move(Move move) {
     char column = 'A' + move[1];  
     int row = move[0] + 1; 
 

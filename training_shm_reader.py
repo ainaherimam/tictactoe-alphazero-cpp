@@ -156,7 +156,7 @@ class TrainingShmReader:
             'z': self.views['z'][indices].copy(),            # [batch_size]
             'mask': self.views['mask'][indices].copy(),      # [batch_size, 16]
         }
-        
+
         return batch
     
     @property

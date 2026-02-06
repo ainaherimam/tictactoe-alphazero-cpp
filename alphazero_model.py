@@ -1,641 +1,424 @@
-#!/usr/bin/env python3
 """
-AlphaZero Neural Network Model with JAX/Flax and Orbax Checkpointing
-IMPROVED VERSION with JIT compilation and fixed learning rate scheduling
+AlphaZero Neural Network Model - JAX/Flax Implementation
+=========================================================
+Contains all model-related components:
+- Network architecture (ResNet-style)
+- Loss function
+- Training state management
+- JIT-compiled training step
 """
 
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
 import optax
+import flax.linen as nn
 from flax.training import train_state
+from typing import Tuple, Any, Dict, Optional
 import orbax.checkpoint as ocp
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Any
-import numpy as np
-from dataclasses import dataclass
-import time
-from functools import partial
 
 
 # ============================================================================
-# Model Architecture
+# MODEL ARCHITECTURE
 # ============================================================================
 
-class AlphaZeroNet(nn.Module):
-    """
-    AlphaZero-style neural network with policy and value heads
-    
-    Architecture:
-    - Shared convolutional representation
-    - Residual blocks
-    - Separate policy and value heads
-    """
-    num_actions: int
-    num_channels: int = 64
-    num_res_blocks: int = 3
+class ResidualBlock(nn.Module):
+    """Residual block with two conv layers."""
+    num_channels: int
     
     @nn.compact
-    def __call__(self, x, training: bool = False):
-        """
-        Forward pass
+    def __call__(self, x, training: bool = True):
+        residual = x
         
-        Args:
-            x: Input tensor [batch, channels, height, width]
-            training: Whether in training mode (for batch norm)
-            
-        Returns:
-            (policy_logits, value): Policy logits and value estimate
-        """
-        # Initial convolutional block
-        x = nn.Conv(features=self.num_channels, kernel_size=(3, 3), padding='SAME')(x)
+        x = nn.Conv(self.num_channels, (3, 3), padding='SAME')(x)
         x = nn.BatchNorm(use_running_average=not training)(x)
         x = nn.relu(x)
         
-        # Residual blocks
+        x = nn.Conv(self.num_channels, (3, 3), padding='SAME')(x)
+        x = nn.BatchNorm(use_running_average=not training)(x)
+        
+        x = x + residual
+        x = nn.relu(x)
+        
+        return x
+
+
+class AlphaZeroNet(nn.Module):
+    """AlphaZero neural network: board → (policy, value)."""
+    num_channels: int = 64
+    num_res_blocks: int = 5
+    num_actions: int = 16
+    
+    @nn.compact
+    def __call__(self, x, mask, training: bool = True):
+        # Input conv
+        x = nn.Conv(self.num_channels, (3, 3), padding='SAME')(x)
+        x = nn.BatchNorm(use_running_average=not training)(x)
+        x = nn.relu(x)
+        
+        # Residual tower
         for _ in range(self.num_res_blocks):
-            residual = x
-            x = nn.Conv(features=self.num_channels, kernel_size=(3, 3), padding='SAME')(x)
-            x = nn.BatchNorm(use_running_average=not training)(x)
-            x = nn.relu(x)
-            x = nn.Conv(features=self.num_channels, kernel_size=(3, 3), padding='SAME')(x)
-            x = nn.BatchNorm(use_running_average=not training)(x)
-            x = x + residual
-            x = nn.relu(x)
+            x = ResidualBlock(self.num_channels)(x, training=training)
         
         # Policy head
-        p = nn.Conv(features=2, kernel_size=(1, 1))(x)
+        p = nn.Conv(2, (1, 1))(x)
         p = nn.BatchNorm(use_running_average=not training)(p)
         p = nn.relu(p)
-        p = p.reshape((p.shape[0], -1))
-        policy_logits = nn.Dense(features=self.num_actions)(p)
+        p = p.reshape((p.shape[0], -1))  # Flatten
+        p = nn.Dense(self.num_actions)(p)
+        
+        # Apply mask and log-softmax
+        p = jnp.where(mask > 0, p, -1e9)
+        p = jax.nn.log_softmax(p, axis=-1)
         
         # Value head
-        v = nn.Conv(features=1, kernel_size=(1, 1))(x)
+        v = nn.Conv(1, (1, 1))(x)
         v = nn.BatchNorm(use_running_average=not training)(v)
         v = nn.relu(v)
-        v = v.reshape((v.shape[0], -1))
-        v = nn.Dense(features=64)(v)
+        v = v.reshape((v.shape[0], -1))  # Flatten
+        v = nn.Dense(64)(v)
         v = nn.relu(v)
-        value = nn.Dense(features=1)(v)
-        value = jnp.tanh(value).squeeze(-1)
+        v = nn.Dense(1)(v)
+        v = jnp.tanh(v).squeeze(-1)
         
-        return policy_logits, value
+        return p, v
 
 
 # ============================================================================
-# Training State
+# TRAINING STATE
 # ============================================================================
 
-class TrainState(train_state.TrainState):
-    """Extended training state with batch statistics for batch norm"""
-    batch_stats: Any = None
+class TrainStateWithBatchStats(train_state.TrainState):
+    """Extended training state with batch statistics for batch norm."""
+    batch_stats: Any
 
 
 # ============================================================================
-# Model Manager
+# LOSS FUNCTION
 # ============================================================================
 
-class AlphaZeroModel:
+def alphazero_loss(params, state, batch):
     """
-    Manages AlphaZero model lifecycle: initialization, loading, training, and checkpointing
-    """
-    
-    def __init__(self, 
-                 num_actions: int,
-                 input_channels: int = 3,
-                 board_height: int = 4,
-                 board_width: int = 4,
-                 num_channels: int = 64,
-                 num_res_blocks: int = 3):
-        """
-        Initialize model configuration
-        
-        Args:
-            num_actions: Number of possible actions (policy output size)
-            input_channels: Number of input channels
-            board_height: Board height
-            board_width: Board width
-            num_channels: Number of channels in conv layers
-            num_res_blocks: Number of residual blocks
-        """
-        self.num_actions = num_actions
-        self.input_channels = input_channels
-        self.board_height = board_height
-        self.board_width = board_width
-        self.num_channels = num_channels
-        self.num_res_blocks = num_res_blocks
-        
-        # Create model
-        self.model = AlphaZeroNet(
-            num_actions=num_actions,
-            num_channels=num_channels,
-            num_res_blocks=num_res_blocks
-        )
-        
-        self.state = None
-        self.checkpointer = None
-        
-        # JIT-compiled inference function (created on first call)
-        self._inference_fn = None
-        
-    def initialize(self, 
-                   learning_rate: float = 1e-3,
-                   weight_decay: float = 1e-4,
-                   seed: int = 0) -> TrainState:
-        """
-        Initialize model parameters and optimizer
-        
-        Args:
-            learning_rate: Initial learning rate
-            weight_decay: L2 regularization weight
-            seed: Random seed
-            
-        Returns:
-            Initialized training state
-        """
-        print(f"[Model] Initializing with lr={learning_rate}, weight_decay={weight_decay}")
-        
-        # Initialize model parameters
-        rng = jax.random.PRNGKey(seed)
-        init_rng, dropout_rng = jax.random.split(rng)
-        
-        dummy_input = jnp.zeros((1, self.input_channels, self.board_height, self.board_width))
-        variables = self.model.init(init_rng, dummy_input, training=True)
-        
-        # Extract params and batch_stats
-        params = variables['params']
-        batch_stats = variables.get('batch_stats', {})
-        
-        # Create optimizer with weight decay (AdamW)
-        optimizer = optax.adamw(
-            learning_rate=learning_rate,
-            weight_decay=weight_decay
-        )
-        
-        # Create training state
-        self.state = TrainState.create(
-            apply_fn=self.model.apply,
-            params=params,
-            tx=optimizer,
-            batch_stats=batch_stats
-        )
-        
-        # Create JIT-compiled inference function
-        self._create_inference_fn()
-        
-        print(f"[Model] ✓ Initialized with {self._count_parameters()} parameters")
-        return self.state
-    
-    def _create_inference_fn(self):
-        """Create JIT-compiled inference function"""
-        @jax.jit
-        def inference(params, batch_stats, x):
-            """Fast inference function"""
-            variables = {'params': params, 'batch_stats': batch_stats}
-            policy_logits, value = self.model.apply(
-                variables, x, training=False, mutable=False
-            )
-            return policy_logits, value
-        
-        self._inference_fn = inference
-    
-    def predict(self, x: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        """
-        Fast inference using JIT-compiled function
-        
-        Args:
-            x: Input tensor [batch, channels, height, width]
-            
-        Returns:
-            (policy_logits, value): Policy logits and value estimates
-        """
-        if self.state is None:
-            raise RuntimeError("Model not initialized. Call initialize() first.")
-        
-        if self._inference_fn is None:
-            self._create_inference_fn()
-        
-        return self._inference_fn(self.state.params, self.state.batch_stats, x)
-    
-    def load(self, checkpoint_path: str) -> TrainState:
-        """
-        Load model from Orbax checkpoint
-        
-        Args:
-            checkpoint_path: Path to checkpoint directory or file
-            
-        Returns:
-            Loaded training state
-        """
-        checkpoint_path = Path(checkpoint_path).resolve()
-        print(f"[Model] Loading checkpoint from {checkpoint_path}")
-        
-        # Create checkpointer if not exists
-        if self.checkpointer is None:
-            self.checkpointer = ocp.StandardCheckpointer()
-        
-        # Load checkpoint
-        restored = self.checkpointer.restore(checkpoint_path)
-        
-        # Reconstruct training state
-        # Initialize optimizer (we'll restore the optimizer state from checkpoint)
-        optimizer = optax.adamw(
-            learning_rate=restored.get('learning_rate', 1e-3),
-            weight_decay=restored.get('weight_decay', 1e-4)
-        )
-        
-        self.state = TrainState(
-            step=restored['step'],
-            apply_fn=self.model.apply,
-            params=restored['params'],
-            tx=optimizer,
-            opt_state=restored['opt_state'],
-            batch_stats=restored.get('batch_stats', {})
-        )
-        
-        # Recreate JIT inference function
-        self._create_inference_fn()
-        
-        print(f"[Model] ✓ Loaded checkpoint at step {self.state.step}")
-        return self.state
-    
-    def save(self, checkpoint_dir: str, step: Optional[int] = None):
-        """
-        Save model checkpoint using Orbax
-        
-        Args:
-            checkpoint_dir: Directory to save checkpoints
-            step: Training step number (optional)
-        """
-        if self.state is None:
-            raise RuntimeError("No model state to save. Initialize or load model first.")
-        
-        checkpoint_dir = Path(checkpoint_dir)
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create checkpointer if not exists
-        if self.checkpointer is None:
-            self.checkpointer = ocp.StandardCheckpointer()
-        
-        # Determine checkpoint path
-        if step is not None:
-            checkpoint_path = checkpoint_dir / f"checkpoint_{step}"
-        else:
-            checkpoint_path = checkpoint_dir / f"checkpoint_{self.state.step}"
-        
-        # Prepare checkpoint data
-        checkpoint_data = {
-            'step': int(self.state.step),
-            'params': self.state.params,
-            'opt_state': self.state.opt_state,
-            'batch_stats': self.state.batch_stats,
-        }
-        
-        # Save checkpoint
-        self.checkpointer.save(checkpoint_path, checkpoint_data)
-        print(f"[Model] ✓ Saved checkpoint to {checkpoint_path}")
-    
-    def _count_parameters(self) -> int:
-        """Count total number of trainable parameters"""
-        if self.state is None:
-            return 0
-        return sum(x.size for x in jax.tree_util.tree_leaves(self.state.params))
-
-
-# ============================================================================
-# Loss and Training
-# ============================================================================
-
-def compute_loss(params, batch_stats, apply_fn, inputs, targets, masks):
-    """
-    Compute combined policy and value loss
+    Compute AlphaZero loss: cross-entropy(policy) + MSE(value).
     
     Args:
         params: Model parameters
-        batch_stats: Batch normalization statistics
-        apply_fn: Model forward function
-        inputs: Input batch [batch, channels, height, width]
-        targets: Target batch [batch, num_actions + 1] (policy + value)
-        masks: Legal action masks [batch, num_actions]
-        
+        state: Training state
+        batch: Dict with keys 'boards', 'pi', 'z', 'mask'
+    
     Returns:
-        (loss, (new_batch_stats, metrics))
+        (total_loss, (metrics_dict, new_batch_stats))
     """
-    # Forward pass with batch norm updates
-    variables = {'params': params, 'batch_stats': batch_stats}
-    (policy_logits, value), new_vars = apply_fn(
-        variables, inputs, training=True, mutable=['batch_stats']
+    boards = batch['boards']  # [B, 3, 4, 4]
+    pi_target = batch['pi']   # [B, 16]
+    z_target = batch['z']     # [B]
+    mask = batch['mask']      # [B, 16]
+    
+    # Forward pass
+    (p_pred, v_pred), updates = state.apply_fn(
+        {'params': params, 'batch_stats': state.batch_stats},
+        boards, 
+        mask,
+        training=True,
+        mutable=['batch_stats']
     )
-    new_batch_stats = new_vars['batch_stats']
     
-    # Extract targets
-    policy_target = targets[:, :-1]
-    value_target = targets[:, -1]
+    # Policy loss: cross-entropy with target distribution
+    policy_loss = -jnp.sum(pi_target * p_pred, axis=-1).mean()
     
-    # Policy loss (cross entropy with masking)
-    masked_logits = jnp.where(masks > 0, policy_logits, -1e9)
-    log_probs = jax.nn.log_softmax(masked_logits, axis=-1)
-    policy_loss = -jnp.mean(jnp.sum(policy_target * log_probs, axis=-1))
+    # Value loss: MSE
+    value_loss = jnp.mean((v_pred - z_target) ** 2)
     
-    # Value loss (MSE)
-    value_loss = jnp.mean(jnp.square(value - value_target))
-    
-    # Combined loss
+    # Total loss
     total_loss = policy_loss + value_loss
     
-    # Compute metrics
-    policy_probs = jax.nn.softmax(masked_logits, axis=-1)
-    policy_entropy = -jnp.mean(jnp.sum(policy_probs * log_probs, axis=-1))
-    
-    # Value accuracy (within 0.1)
-    value_accuracy = jnp.mean(jnp.abs(value - value_target) < 0.1)
-    
-    # Sign accuracy (same sign)
-    sign_accuracy = jnp.mean((value * value_target) > 0)
-    
+    # Metrics
     metrics = {
+        'loss': total_loss,
         'policy_loss': policy_loss,
         'value_loss': value_loss,
-        'total_loss': total_loss,
-        'policy_entropy': policy_entropy,
-        'value_accuracy': value_accuracy,
-        'sign_accuracy': sign_accuracy,
+        'policy_entropy': -jnp.sum(jnp.exp(p_pred) * p_pred, axis=-1).mean(),
+        'value_accuracy': jnp.mean(jnp.abs(v_pred - z_target) < 0.4),
     }
     
-    return total_loss, (new_batch_stats, metrics)
+    return total_loss, (metrics, updates['batch_stats'])
 
+
+# ============================================================================
+# TRAINING STEP (JIT-COMPILED)
+# ============================================================================
 
 @jax.jit
-def train_step(state: TrainState, inputs, targets, masks):
+def train_step(state, batch):
     """
-    Single training step
+    Single gradient step.
     
     Args:
-        state: Training state
-        inputs: Input batch
-        targets: Target batch
-        masks: Legal move masks
-        
+        state: Training state with params, optimizer state, batch_stats
+        batch: Dictionary with 'boards', 'pi', 'z', 'mask'
+    
     Returns:
-        (new_state, metrics)
+        (updated_state, metrics_dict)
     """
-    def loss_fn(params):
-        return compute_loss(
-            params, state.batch_stats, state.apply_fn,
-            inputs, targets, masks
-        )
+    grad_fn = jax.value_and_grad(alphazero_loss, has_aux=True)
+    (loss, (metrics, new_batch_stats)), grads = grad_fn(state.params, state, batch)
     
-    # Compute gradients
-    (loss, (new_batch_stats, metrics)), grads = jax.value_and_grad(
-        loss_fn, has_aux=True
-    )(state.params)
+    # Update parameters and batch stats
+    state = state.apply_gradients(grads=grads)
+    state = state.replace(batch_stats=new_batch_stats)
     
-    # Compute gradient norm
-    grad_norm = jnp.sqrt(sum(
-        jnp.sum(jnp.square(g)) for g in jax.tree_util.tree_leaves(grads)
-    ))
-    metrics['gradient_norm'] = grad_norm
+    # Add gradient norm to metrics
+    metrics['grad_norm'] = optax.global_norm(grads)
     
-    # Update parameters
-    new_state = state.apply_gradients(
-        grads=grads,
-        batch_stats=new_batch_stats
+    return state, metrics
+
+
+# ============================================================================
+# MODEL INITIALIZATION
+# ============================================================================
+
+class TrainingConfig:
+    """Training hyperparameters and settings."""
+    
+    # Data settings
+    min_positions: int = 1024           # Wait for this many before starting
+    batch_size: int = 128               # Positions per gradient step
+    steps_per_generation: int = 10      # Steps to run when new data arrives
+    
+    # Model architecture
+    num_channels: int = 64              # Residual block channels
+    num_res_blocks: int = 3             # Number of residual blocks
+    
+    # Optimization
+    learning_rate: float = 0.001        # Initial learning rate
+    weight_decay: float = 1e-4          # L2 regularization
+    grad_clip: float = 1.0              # Gradient clipping threshold
+    
+    # Learning rate schedule
+    lr_schedule: str = "cosine"         # "constant" or "cosine"
+    lr_warmup_steps: int = 100          # Warmup steps for cosine schedule
+    lr_min: float = 1e-5                # Minimum LR for cosine schedule
+    
+    # Checkpointing
+    checkpoint_dir: str = "checkpoints"
+    save_every_n_gens: int = 10        # Save checkpoint every N generations
+    
+    # Logging
+    log_every_n_steps: int = 10         # Print metrics every N steps
+    verbose: bool = True                # Detailed logging
+
+
+def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3, num_actions: int = 16):
+    """
+    Initialize model for inference only (no optimizer).
+    
+    Args:
+        rng: JAX random key
+        num_channels: Number of channels in residual blocks
+        num_res_blocks: Number of residual blocks
+        num_actions: Number of possible actions (policy size)
+    
+    Returns:
+        Dictionary with 'params', 'batch_stats', and 'apply_fn'
+    """
+    # Create model
+    model = AlphaZeroNet(
+        num_channels=num_channels,
+        num_res_blocks=num_res_blocks,
+        num_actions=num_actions
     )
     
-    return new_state, metrics
+    # Initialize with dummy input
+    dummy_board = jnp.zeros((1, 3, 4, 4))
+    dummy_mask = jnp.ones((1, num_actions))
+    
+    variables = model.init(rng, dummy_board, dummy_mask, training=False)
+    
+    return {
+        'params': variables['params'],
+        'batch_stats': variables['batch_stats'],
+        'apply_fn': model.apply,
+    }
 
 
-# ============================================================================
-# Training Function (FIXED)
-# ============================================================================
-
-def train(
-    model: AlphaZeroModel,
-    dataset,  # Should have .get(idx) method returning (data, target)
-    batch_size: int,
-    training_steps: int,
-    learning_rate: float = 1e-3,
-    min_lr: float = 1e-4,
-    weight_decay: float = 1e-4,
-    checkpoint_dir: Optional[str] = None,
-    checkpoint_interval: int = 1000,
-    log_interval: int = 100,
-    logger=None,  # Optional logger with add_scalar and flush_metrics methods
-    current_iteration: int = 0,
-    global_step: int = 0,
-    seed: int = 0
-):
+def create_train_state(rng, config: TrainingConfig):
     """
-    Train the AlphaZero model with FIXED learning rate scheduling
+    Initialize model and optimizer.
     
-    Key fixes:
-    - Use optax.inject_hyperparams to update learning rate without resetting optimizer state
-    - Proper cosine annealing schedule
+    Args:
+        rng: JAX random key
+        config: Training configuration
+    
+    Returns:
+        Initialized training state with params, optimizer, and batch_stats
     """
-    print(f"\n{'='*70}")
-    print(f"Starting Training")
-    print(f"{'='*70}")
-    print(f"Batch size: {batch_size}")
-    print(f"Training steps: {training_steps}")
-    print(f"Learning rate: {learning_rate} -> {min_lr}")
-    print(f"Checkpoint dir: {checkpoint_dir}")
-    print(f"{'='*70}\n")
     
-    # Initialize model if not already initialized
-    if model.state is None:
-        # Create optimizer with learning rate schedule
-        schedule = optax.cosine_decay_schedule(
-            init_value=learning_rate,
-            decay_steps=training_steps,
-            alpha=min_lr / learning_rate
+    # Create model
+    model = AlphaZeroNet(
+        num_channels=config.num_channels,
+        num_res_blocks=config.num_res_blocks,
+        num_actions=16
+    )
+    
+    # Initialize with dummy input
+    dummy_board = jnp.zeros((1, 3, 4, 4))
+    dummy_mask = jnp.ones((1, 16))
+    
+    variables = model.init(rng, dummy_board, dummy_mask, training=False)
+    params = variables['params']
+    batch_stats = variables['batch_stats']
+    
+    # Create optimizer with weight decay and gradient clipping
+    if config.lr_schedule == "cosine":
+        schedule = optax.warmup_cosine_decay_schedule(
+            init_value=0.0,
+            peak_value=config.learning_rate,
+            warmup_steps=config.lr_warmup_steps,
+            decay_steps=10000,  # Will be updated dynamically
+            end_value=config.lr_min,
         )
-        
-        optimizer = optax.adamw(
-            learning_rate=schedule,
-            weight_decay=weight_decay
-        )
-        
-        # Initialize with scheduled optimizer
-        rng = jax.random.PRNGKey(seed)
-        dummy_input = jnp.zeros((1, model.input_channels, model.board_height, model.board_width))
-        variables = model.model.init(rng, dummy_input, training=True)
-        
-        params = variables['params']
-        batch_stats = variables.get('batch_stats', {})
-        
-        model.state = TrainState.create(
-            apply_fn=model.model.apply,
-            params=params,
-            tx=optimizer,
-            batch_stats=batch_stats
-        )
-        model._create_inference_fn()
+    else:
+        schedule = config.learning_rate
     
-    state = model.state
+    tx = optax.chain(
+        optax.clip_by_global_norm(config.grad_clip),
+        optax.adamw(learning_rate=schedule, weight_decay=config.weight_decay)
+    )
     
-    # Random number generator for sampling
-    rng = np.random.RandomState(seed)
-    dataset_size = len(dataset)
-    
-    # Training statistics
-    total_policy_loss = 0.0
-    total_value_loss = 0.0
-    total_loss = 0.0
-    total_policy_entropy = 0.0
-    total_value_accuracy = 0.0
-    total_sign_accuracy = 0.0
-    max_gradient_norm = 0.0
-    
-    start_time = time.time()
-    
-    for step in range(1, training_steps + 1):
-        # Sample batch
-        batch_indices = rng.randint(0, dataset_size, size=batch_size)
-        batch_data = [dataset.get(idx) for idx in batch_indices]
-        
-        # Stack into batches
-        inputs = jnp.stack([item[0] for item in batch_data])
-        targets = jnp.stack([item[1] for item in batch_data])
-        
-        # Extract masks (assuming last columns after policy target)
-        policy_size = model.num_actions
-        masks = targets[:, policy_size + 1:]  # After value target
-        targets = targets[:, :policy_size + 1]  # Policy + value only
-        
-        # Training step
-        state, metrics = train_step(state, inputs, targets, masks)
-        
-        # Get current learning rate from optimizer state
-        # (automatically handled by cosine_decay_schedule)
-        current_lr = learning_rate  # Will be updated by schedule
-        
-        # Accumulate metrics
-        total_policy_loss += float(metrics['policy_loss'])
-        total_value_loss += float(metrics['value_loss'])
-        total_loss += float(metrics['total_loss'])
-        total_policy_entropy += float(metrics['policy_entropy'])
-        total_value_accuracy += float(metrics['value_accuracy'])
-        total_sign_accuracy += float(metrics['sign_accuracy'])
-        max_gradient_norm = max(max_gradient_norm, float(metrics['gradient_norm']))
-        
-        # Logging
-        if step % log_interval == 0:
-            elapsed = time.time() - start_time
-            samples_per_sec = (step * batch_size) / max(elapsed, 1.0)
-            
-            avg_policy_loss = total_policy_loss / log_interval
-            avg_value_loss = total_value_loss / log_interval
-            avg_total_loss = total_loss / log_interval
-            avg_policy_entropy = total_policy_entropy / log_interval
-            avg_value_accuracy = total_value_accuracy / log_interval
-            avg_sign_accuracy = total_sign_accuracy / log_interval
-            
-            # Calculate actual current LR
-            progress = step / training_steps
-            current_lr = min_lr + (learning_rate - min_lr) * \
-                        (1 + np.cos(np.pi * progress)) / 2.0
-            
-            print(f"Step {step}/{training_steps} | "
-                  f"Loss: {avg_total_loss:.4f} | "
-                  f"Policy: {avg_policy_loss:.4f} | "
-                  f"Value: {avg_value_loss:.4f} | "
-                  f"Entropy: {avg_policy_entropy:.4f} | "
-                  f"V-Acc: {avg_value_accuracy:.3f} | "
-                  f"Sign-Acc: {avg_sign_accuracy:.3f} | "
-                  f"LR: {current_lr:.2e} | "
-                  f"GradNorm: {max_gradient_norm:.3f}")
-            
-            # Log to external logger if provided
-            if logger is not None:
-                current_global_step = global_step + step
-                logger.add_scalar("global_step", current_global_step)
-                logger.add_scalar("iteration", current_iteration)
-                logger.add_scalar("training_step", step)
-                logger.add_scalar("training/total_loss", float(metrics['total_loss']))
-                logger.add_scalar("training/policy_loss", float(metrics['policy_loss']))
-                logger.add_scalar("training/value_loss", float(metrics['value_loss']))
-                logger.add_scalar("training/policy_entropy", float(metrics['policy_entropy']))
-                logger.add_scalar("training/value_accuracy", float(metrics['value_accuracy']))
-                logger.add_scalar("training/sign_accuracy", float(metrics['sign_accuracy']))
-                logger.add_scalar("training/learning_rate", current_lr)
-                logger.add_scalar("training/gradient_norm", float(metrics['gradient_norm']))
-                logger.add_scalar("training/samples_per_sec", samples_per_sec)
-                logger.flush_metrics()
-            
-            # Reset accumulators
-            total_policy_loss = 0.0
-            total_value_loss = 0.0
-            total_loss = 0.0
-            total_policy_entropy = 0.0
-            total_value_accuracy = 0.0
-            total_sign_accuracy = 0.0
-            max_gradient_norm = 0.0
-        
-        # Checkpointing
-        if checkpoint_dir and step % checkpoint_interval == 0:
-            model.state = state
-            model.save(checkpoint_dir, step=global_step + step)
-    
-    # Save final checkpoint
-    if checkpoint_dir:
-        model.state = state
-        model.save(checkpoint_dir, step=global_step + training_steps)
-    
-    model.state = state
-    print(f"\n✅ Training completed!\n")
+    # Create training state with batch_stats
+    state = TrainStateWithBatchStats.create(
+        apply_fn=model.apply,
+        params=params,
+        tx=tx,
+        batch_stats=batch_stats,
+    )
     
     return state
 
 
 # ============================================================================
-# Example Usage
+# CHECKPOINTING (ORBAX)
 # ============================================================================
 
-if __name__ == "__main__":
-    print("Testing AlphaZero Model with JIT inference...")
+# Global checkpointer instance (reused across saves/loads)
+_checkpointer = None
+
+def get_checkpointer():
+    """Get or create the global checkpointer instance."""
+    global _checkpointer
+    if _checkpointer is None:
+        _checkpointer = ocp.StandardCheckpointer()
+    return _checkpointer
+
+
+def save_checkpoint(state, checkpoint_dir: str, step: Optional[int] = None):
+    """
+    Save model weights using Orbax (params and batch_stats only).
     
-    # Initialize model
-    model = AlphaZeroModel(
-        num_actions=16,
-        input_channels=3,
-        board_height=4,
-        board_width=4
+    Args:
+        state: Training state
+        checkpoint_dir: Directory to save checkpoints
+        step: Training step number (uses state.step if None)
+    """
+
+    checkpoint_dir = Path(checkpoint_dir).resolve()
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine checkpoint path
+    step = int(step if step is not None else state.step)
+    checkpoint_path = checkpoint_dir / f"checkpoint_{step}"
+
+    # Only save weights (params and batch_stats)
+    checkpoint_data = {
+        'params': state.params,
+        'batch_stats': state.batch_stats,
+    }
+
+    checkpointer = get_checkpointer()
+    checkpointer.save(checkpoint_path, checkpoint_data)
+
+    print(f"[Checkpoint] ✓ Saved weights to checkpoint_{step}")
+
+
+
+def load_checkpoint(state, checkpoint_path: str, learning_rate: float = 1e-3, 
+                    weight_decay: float = 1e-4, grad_clip: float = 1.0) -> 'TrainStateWithBatchStats':
+    """
+    Load model weights from Orbax checkpoint and create fresh optimizer.
+    
+    Args:
+        state: Template training state (for structure)
+        checkpoint_path: Path to checkpoint directory
+        learning_rate: Learning rate for new optimizer
+        weight_decay: Weight decay for new optimizer
+        grad_clip: Gradient clipping threshold for new optimizer
+    
+    Returns:
+        New training state with loaded weights and fresh optimizer
+    """
+    checkpoint_path = Path(checkpoint_path).resolve()
+    print(f"[Checkpoint] Loading weights from {checkpoint_path}")
+    
+    # Load checkpoint
+    checkpointer = get_checkpointer()
+    restored = checkpointer.restore(checkpoint_path)
+    
+    # Create fresh optimizer
+    tx = optax.chain(
+        optax.clip_by_global_norm(grad_clip),
+        optax.adamw(learning_rate=learning_rate, weight_decay=weight_decay)
     )
     
-    # Initialize
-    state = model.initialize(learning_rate=1e-3)
+    # Create new training state with loaded weights
+    state = TrainStateWithBatchStats.create(
+        apply_fn=state.apply_fn,
+        params=restored['params'],
+        tx=tx,
+        batch_stats=restored.get('batch_stats', {}),
+    )
     
-    # Test inference speed
-    x = jnp.ones((1, 3, 4, 4))
+    print(f"[Checkpoint] ✓ Loaded weights (created fresh optimizer)")
+    return state
+
+
+def load_checkpoint_for_inference(
+    checkpoint_path: str,
+    num_channels: int = 64,
+    num_res_blocks: int = 3,
+    num_actions: int = 16
+) -> Dict:
+    """
+    Load checkpoint for inference only (no optimizer).
     
-    # Warm-up (JIT compilation)
-    print("\nWarming up JIT compilation...")
-    _ = model.predict(x)
+    This loads only the model weights (params and batch_stats).
     
-    # Benchmark
-    print("\nBenchmarking inference...")
-    num_runs = 100
-    start = time.time()
-    for _ in range(num_runs):
-        policy, value = model.predict(x)
-        value.block_until_ready()  # Ensure computation completes
-    elapsed = time.time() - start
+    Args:
+        checkpoint_path: Path to checkpoint directory
+        num_channels: Number of channels in model
+        num_res_blocks: Number of residual blocks  
+        num_actions: Number of possible actions
     
-    avg_time_ms = (elapsed / num_runs) * 1000
-    print(f"✓ Average inference time: {avg_time_ms:.2f}ms per batch")
-    print(f"  Expected: <5ms on CPU, yours: {avg_time_ms:.2f}ms")
+    Returns:
+        Dictionary with 'params', 'batch_stats', 'apply_fn'
+    """
+    checkpoint_path = Path(checkpoint_path).resolve()
+    print(f"[Checkpoint] Loading inference weights from {checkpoint_path}")
     
-    if avg_time_ms < 5:
-        print("  ✅ Performance is good!")
-    elif avg_time_ms < 10:
-        print("  ⚠️  Performance is acceptable but could be better")
-    else:
-        print("  ❌ Performance is slow - check your hardware")
+    # Load checkpoint directly with Orbax
+    checkpointer = get_checkpointer()
+    restored = checkpointer.restore(checkpoint_path)
     
-    # Save and load test
-    print("\nTesting checkpointing...")
-    model.save("checkpoints", step=0)
-    loaded_state = model.load("checkpoints/checkpoint_0")
+    # Create model for apply_fn
+    model = AlphaZeroNet(
+        num_channels=num_channels,
+        num_res_blocks=num_res_blocks,
+        num_actions=num_actions
+    )
     
-    print("\n✅ All tests passed!")
+    print(f"[Checkpoint] ✓ Loaded inference weights")
+    
+    return {
+        'params': restored['params'],
+        'batch_stats': restored.get('batch_stats', {}),
+        'apply_fn': model.apply,
+    }

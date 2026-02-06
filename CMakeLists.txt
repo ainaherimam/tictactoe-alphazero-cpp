@@ -18,27 +18,18 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 # === Dependencies ==========================================
 # ============================================================
 
-# ---- Torch -------------------------------------------------
-# NOTE: Still needed for tensor operations in MCTS, just not for inference
-if(NOT Torch_DIR AND DEFINED ENV{TORCH_HOME})
-    set(Torch_DIR "$ENV{TORCH_HOME}/share/cmake/Torch")
-endif()
-find_package(Torch REQUIRED)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
-
 # ---- Boost -------------------------------------------------
 find_package(Boost REQUIRED COMPONENTS system)
 
 # ---- Threads ----------------------------------------------
 find_package(Threads REQUIRED)
 
-# ---- OpenSSL (if needed) ----------------------------------
+# ---- OpenSSL (optional) -----------------------------------
 find_package(OpenSSL)
 
 # ============================================================
-# === Shared Memory Inference Library =======================
+# === Shared Memory Inference (Header-only) =================
 # ============================================================
-# Header-only library for shared memory communication with JAX
 
 add_library(shared_memory_inference INTERFACE)
 
@@ -48,13 +39,11 @@ target_include_directories(shared_memory_inference INTERFACE
 )
 
 target_link_libraries(shared_memory_inference INTERFACE
-    ${TORCH_LIBRARIES}
     ${Boost_LIBRARIES}
-    rt          # POSIX shared memory (shm_open, shm_unlink)
-    pthread     # POSIX threads
+    rt
+    pthread
 )
 
-# Optional: Link OpenSSL if found (may be needed for some Boost features)
 if(OpenSSL_FOUND)
     target_link_libraries(shared_memory_inference INTERFACE
         OpenSSL::SSL
@@ -63,11 +52,10 @@ if(OpenSSL_FOUND)
 endif()
 
 # ============================================================
-# === Main Executable ========================================
+# === Core AlphaZero Library ================================
 # ============================================================
 
-add_executable(AlphaZero_TTT
-    main.cpp
+add_library(az_core
     board.cpp
     game.cpp
     position_pool.cpp
@@ -75,19 +63,41 @@ add_executable(AlphaZero_TTT
     player.cpp
     logger.cpp
     mcts_agent_selfplay.cpp
-    inference_client.cpp
     inference_queue_shm.cpp
     training_shm_writer.cpp
 )
 
-target_include_directories(AlphaZero_TTT PRIVATE
+target_include_directories(az_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(AlphaZero_TTT PRIVATE
+target_link_libraries(az_core PUBLIC
     shared_memory_inference
-    ${TORCH_LIBRARIES}
     Threads::Threads
+)
+
+# ============================================================
+# === Main Executable =======================================
+# ============================================================
+
+add_executable(AlphaZero_TTT
+    main.cpp
+)
+
+target_link_libraries(AlphaZero_TTT PRIVATE
+    az_core
+)
+
+# ============================================================
+# === Eval Executable =======================================
+# ============================================================
+
+add_executable(AlphaZero_TTT_Eval
+    eval.cpp
+)
+
+target_link_libraries(AlphaZero_TTT_Eval PRIVATE
+    az_core
 )
 
 # ============================================================
@@ -96,7 +106,7 @@ target_link_libraries(AlphaZero_TTT PRIVATE
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(AlphaZero_TTT PRIVATE
+        target_compile_options(az_core PRIVATE
             -O3
             -march=native
             -DNDEBUG
@@ -112,28 +122,20 @@ set_property(TARGET AlphaZero_TTT PROPERTY
     INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 
-# ============================================================
-# === Windows Torch DLL fix =================================
-# ============================================================
-
-if(MSVC)
-    file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
-    add_custom_command(TARGET AlphaZero_TTT POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${TORCH_DLLS}
-        $<TARGET_FILE_DIR:AlphaZero_TTT>
-    )
-endif()
+set_property(TARGET AlphaZero_TTT_Eval PROPERTY
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+)
 
 # ============================================================
 # === Installation (Optional) ===============================
 # ============================================================
 
-install(TARGETS AlphaZero_TTT
+install(TARGETS
+    AlphaZero_TTT
+    AlphaZero_TTT_Eval
     RUNTIME DESTINATION bin
 )
 
-# Install Python inference server alongside binary
 install(FILES
     inference_server.py
     alphazero_model.py
@@ -151,7 +153,6 @@ message(STATUS "")
 message(STATUS "=== AlphaZero JAX Configuration ===")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "Torch_DIR: ${Torch_DIR}")
 message(STATUS "Boost version: ${Boost_VERSION}")
 message(STATUS "Threads: ${CMAKE_THREAD_LIBS_INIT}")
 message(STATUS "Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
@@ -159,29 +160,10 @@ message(STATUS "")
 message(STATUS "Shared Memory System: ENABLED")
 message(STATUS "  - Header-only shared memory library")
 message(STATUS "  - JAX Python inference server required")
-message(STATUS "  - POSIX shared memory (rt library)")
 message(STATUS "")
-message(STATUS "Important Files:")
-message(STATUS "  - shared_memory_protocol.h")
-message(STATUS "  - inference_queue_shm.h")
-message(STATUS "  - selfplay_manager_shm.h")
-message(STATUS "  - inference_server.py")
-message(STATUS "  - alphazero_model.py")
+message(STATUS "Executables:")
+message(STATUS "  - AlphaZero_TTT (main self-play)")
+message(STATUS "  - AlphaZero_TTT_
+ (eval harness)")
 message(STATUS "====================================")
-message(STATUS "")
-
-# ============================================================
-# === Build Instructions ====================================
-# ============================================================
-
-message(STATUS "Build Instructions:")
-message(STATUS "  1. mkdir build && cd build")
-message(STATUS "  2. cmake ..")
-message(STATUS "  3. make -j$(nproc)")
-message(STATUS "")
-message(STATUS "Run Instructions:")
-message(STATUS "  1. Start JAX server:")
-message(STATUS "     python3 inference_server.py --model1 checkpoints/model")
-message(STATUS "  2. Run C++ program:")
-message(STATUS "     ./AlphaZero_TTT")
 message(STATUS "")

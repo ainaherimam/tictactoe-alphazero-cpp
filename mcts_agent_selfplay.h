@@ -5,9 +5,8 @@
 #include <mutex>
 #include <random>
 #include <vector>
-
 #include "board.h"
-#include "inference_queue.h"
+#include "inference_queue_shm.h"
 #include "logger.h"
 
 
@@ -44,10 +43,10 @@ public:
               float temperature = 1.0f,
               float dirichlet_alpha = 0.3f,
               float dirichlet_epsilon = 0.25f,
-              InferenceQueue* inference_queue = nullptr,
+              std::shared_ptr<SharedMemoryInferenceQueue> queue = nullptr,
               int max_depth = -1,
               bool tree_reuse = false,
-              ModelID model_id = ModelID::MODEL_1);
+              uint32_t model_id = 0);
 
     /**
      * @brief Selects the best move using Monte Carlo Tree Search (MCTS)
@@ -66,22 +65,11 @@ public:
      *
      * @throws runtime_error If insufficient simulations prevent a reliable decision
      */
-    std::pair<std::array<int, 4>, torch::Tensor> choose_move(const Board& board, Cell_state player);
+    std::pair<Move, std::vector<float>> choose_move(const Board& board, Cell_state player);
 
-    /**
-     * @brief Executes random moves on the board for exploration
-     *network
-     * Updates the board state by making a specified number of random valid moves,
-     * alternating between players as appropriate.
-     *
-     * @param board Board state to modify
-     * @param player The current player making the first move
-     * @param random_move_number Number of random moves to execute
-     */
-    void random_move(Board& board, Cell_state player, int random_move_number);
 
 private:
-    InferenceQueue* inference_queue = nullptr;
+    std::shared_ptr<SharedMemoryInferenceQueue> queue;
     double exploration_factor;
     int number_iteration;
     LogLevel log_level;
@@ -93,7 +81,7 @@ private:
     float dirichlet_epsilon;    // Epsilon for Dirichlet noise mixing
     int max_depth;              // Maximum search depth
     bool tree_reuse;            // Whether to reuse search tree
-    ModelID model_id;
+    uint32_t model_id;
 
     /**
      * @brief Represents a node in the Monte Carlo Tree Search (MCTS) tree
@@ -137,7 +125,7 @@ private:
          *
          * For root node, uses sentinel value {-1, -1, -1, -1}
          */
-        std::array<int, 4> move;
+        Move move;
 
         /**
          * @brief Player that will make the move from this state
@@ -169,7 +157,7 @@ private:
          * @param value_from_nn Value estimate of this state from neural network
          * @param parent_node Parent node pointer (nullptr for root)
          */
-        Node(Cell_state player, std::array<int, 4> move, float prior_proba, 
+        Node(Cell_state player, Move move, float prior_proba, 
              float value_from_nn, std::shared_ptr<Node> parent_node = nullptr);
     };
 
@@ -234,7 +222,7 @@ private:
     * @return Pair containing the selected child node and a 1D policy tensor of size 
     *         (X * Y * DIR * TAR) for data collection.
     */
-    std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, torch::Tensor> sample_child_and_get_policy(
+    std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, std::vector<float>> sample_child_and_get_policy(
     const std::shared_ptr<Node>& parent_node) const;
 
     /**
@@ -243,12 +231,11 @@ private:
      * Extracts non-zero entries from the policy tensor and converts them into
      * a list of move-probability pairs for easier processing.
      *
-     * @param log_probs_tensor 1D tensor of log probabilities for all moves from NN
+     * @param probs 1D tensor of log probabilities for all moves from NN
      *
      * @return Vector of pairs: (move array {x, y, direction, target}, normalized probability)
      */
-    std::vector<std::pair<std::array<int, 4>, float>> get_moves_with_probs(
-        const torch::Tensor& log_probs_tensor) const;
+    std::vector<std::pair<Move, float>> get_moves_with_probs(const float* probs) const;
 
     /**
      * @brief Select a leaf by moving the tree using PUCT Score

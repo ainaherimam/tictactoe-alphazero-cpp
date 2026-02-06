@@ -1,17 +1,16 @@
 ﻿#include "board.h"
-#include <torch/torch.h>
-
 #include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <vector>
+#include "constants.h"
 
 
-Board::Board(int size)
-    : board_size(4),
-    empty_board(4, std::vector<Cell_state>(4, Cell_state::Empty)),
-    history(4, std::vector<std::vector<Cell_state>>(4, std::vector<Cell_state>(4, Cell_state::Empty))),
-    board(4, std::vector<Cell_state>(4, Cell_state::Empty)) {
+Board::Board(int board_size)
+    : board_size(board_size), 
+      empty_board(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty)),
+    history(board_size, std::vector<std::vector<Cell_state>>(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty))),
+    board(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty)) {
 
         // board[0][0] = Cell_state::X;
         // board[3][3] = Cell_state::O;
@@ -23,8 +22,8 @@ Board::Board(int size)
 
 int Board::get_board_size() const { return board_size; }
 
-bool Board::is_within_bounds(int move_x, int move_y) const {
-    return move_x >= 0 && move_x < 4 && move_y >= 0 && move_y < 4;
+bool Board::is_within_bounds(Move move) const {
+    return move.x >= 0 && move.y < board_size && move.y >= 0 && move.x < board_size;
 }
 
 
@@ -39,11 +38,11 @@ bool Board::is_in_vector(int x, int y, const std::vector<std::array<int, 2>>& ve
     return std::find(vector.begin(), vector.end(), std::array<int, 2>{x, y}) != vector.end();
 }
 
-void Board::print_valid_moves(std::vector<std::array<int, 4>> moves) const {
+void Board::print_valid_moves(std::vector<Move> moves) const {
     int index = 1;
     for (const auto& move : moves) {
-        char column = 'A' + move[1];
-        int row = move[0] + 1;
+        char column = 'A' + move.y;
+        int row = move.x + 1;
         
         std::cout << index << " - (" << row << column << ")\n";
         index++;
@@ -51,15 +50,15 @@ void Board::print_valid_moves(std::vector<std::array<int, 4>> moves) const {
 }
 
 
-std::vector<std::array<int, 4>> Board::get_valid_moves(Cell_state player) const {
-    std::vector<std::array<int, 4>> valid_moves;
+std::vector<Move> Board::get_valid_moves(Cell_state player) const {
     
-
-    for (int x = 0; x < 4; ++x) {
-        for (int y = 0; y < 4; ++y) {
+    std::vector<Move> valid_moves;
+    
+    for (int x = 0; x < board_size; ++x) {
+        for (int y = 0; y < board_size; ++y) {
             // Empty cells means valid move
             if (board[x][y] == Cell_state::Empty) {
-                valid_moves.emplace_back(std::array<int, 4>{x, y, 0, 0});
+                valid_moves.push_back(Move{.x = x,.y = y,.dir = -1,.tar = -1});
             }
         }
     }
@@ -67,81 +66,43 @@ std::vector<std::array<int, 4>> Board::get_valid_moves(Cell_state player) const 
     return valid_moves;
 }
 
-void Board::make_move(int move_x, int move_y, int dir, int tar, Cell_state player) {
+void Board::make_move(Move move, Cell_state player) {
     add_history();
     
-    if (is_within_bounds(move_x, move_y) && board[move_x][move_y] == Cell_state::Empty) {
-        board[move_x][move_y] = player;
+    if (is_within_bounds(move) && board[move.x][move.y] == Cell_state::Empty) {
+        board[move.x][move.y] = player;
     }
 }
 
-
-torch::Tensor Board::to_tensor(Cell_state player) const {
-    torch::Tensor stacked = torch::zeros({3, 4, 4}, torch::kFloat32);
+void Board::to_float_array(Cell_state player, float* output) const {
+    // Initialize to zero
+    for (int i = 0; i < 3 * X_ * Y_; ++i) {
+        output[i] = 0.0f;
+    }
     
-    for (int x = 0; x < 4; ++x) {
-        for (int y = 0; y < 4; ++y) {
+    for (int x = 0; x < board_size; ++x) {
+        for (int y = 0; y < board_size; ++y) {
+            int plane0_idx = 0 * 16 + x * 4 + y;
+            int plane1_idx = 1 * 16 + x * 4 + y;
+            int plane2_idx = 2 * 16 + x * 4 + y;
+            
             // Plane 0: Current player's pieces
             if (board[x][y] == player) {
-                stacked[0][x][y] = 1.0f;
+                output[plane0_idx] = 1.0f;
             }
             // Plane 1: Opponent's pieces
             else if (board[x][y] != Cell_state::Empty) {
-                stacked[1][x][y] = 1.0f;
+                output[plane1_idx] = 1.0f;
             }
             // Plane 2: Current player indicator (0 for X, 1 for O)
-            stacked[2][x][y] = (player == Cell_state::X) ? 0.0f : 1.0f;
-        }
-    }
-    
-    return stacked;
-}
-
-void Board::fill_tensor(torch::Tensor& tensor, Cell_state player) const {
-    auto accessor = tensor.accessor<float, 3>();
-    const float player_plane_value = (player == Cell_state::X) ? 0.0f : 1.0f;
-    
-    // Plane 0 and Plane 1: Current player's pieces and Opponent's pieces
-    for (int x = 0; x < 4; ++x) {
-        for (int y = 0; y < 4; ++y) {
-            Cell_state cell = board[x][y];
-            
-            if (cell == player) {
-                accessor[0][x][y] = 1.0f;
-            } else if (cell != Cell_state::Empty) {
-                accessor[1][x][y] = 1.0f;
-            }
-            
-            // Plane 2: Current player indicator (0 for X, 1 for O)
-            accessor[2][x][y] = player_plane_value;
+            output[plane2_idx] = (player == Cell_state::X) ? 0.0f : 1.0f;
         }
     }
 }
-
-
-void Board::fill_mask(torch::Tensor& mask, Cell_state player) const {
-    auto accessor = mask.accessor<float, 1>();
-    auto valid_moves = get_valid_moves(player);
-    
-    const int Y_DIR_TAR = 4 * 1 * 1;
-    const int DIR_TAR = 1 * 1;
-    
-    for (const auto& move : valid_moves) {
-        int idx = move[0] * Y_DIR_TAR + 
-                  move[1] * DIR_TAR + 
-                  (move[2] - 1) * 4 + 
-                  (move[3] + 1);
-        
-        if (idx >= 0 && idx < 16) {
-            accessor[idx] = 1.0f;
-        }
-    }
-}
-
 
 
 Cell_state Board::check_winner() const {
-    // lambda function to get the opponent (for Misère rules)
+    // lambda function to get the opponent
     auto opponent = [](Cell_state player) -> Cell_state {
         if (player == Cell_state::X) return Cell_state::O;
         if (player == Cell_state::O) return Cell_state::X;
@@ -195,93 +156,47 @@ Cell_state Board::check_winner() const {
     return Cell_state::Empty;
 }
 
-// Cell_state Board::check_winner() const {
+void Board::get_legal_mask(Cell_state player, float* output) const {
 
-//     // Check horizontal 4-in-a-row
-//     for (int i = 0; i < 4; ++i) {
-//         if (board[i][0] != Cell_state::Empty &&
-//             board[i][0] == board[i][1] &&
-//             board[i][1] == board[i][2] &&
-//             board[i][2] == board[i][3]) {
-//             return board[i][0];
-//         }
-//     }
+    const int total_size = X_ * Y_ * DIR_ * TAR_;
 
-//     // Check vertical 4-in-a-row
-//     for (int j = 0; j < 4; ++j) {
-//         if (board[0][j] != Cell_state::Empty &&
-//             board[0][j] == board[1][j] &&
-//             board[1][j] == board[2][j] &&
-//             board[2][j] == board[3][j]) {
-//             return board[0][j];
-//         }
-//     }
-
-//     // Check main diagonal (top-left → bottom-right)
-//     if (board[0][0] != Cell_state::Empty &&
-//         board[0][0] == board[1][1] &&
-//         board[1][1] == board[2][2] &&
-//         board[2][2] == board[3][3]) {
-//         return board[0][0];
-//     }
-
-//     // Check anti-diagonal (top-right → bottom-left)
-//     if (board[0][3] != Cell_state::Empty &&
-//         board[0][3] == board[1][2] &&
-//         board[1][2] == board[2][1] &&
-//         board[2][1] == board[3][0]) {
-//         return board[0][3];
-//     }
-
-//     return Cell_state::Empty; // No winner
-// }
-
-
-
-torch::Tensor Board::get_legal_mask(Cell_state player) const {
-    const int X = 4;
-    const int Y = 4;
-    const int DIR = 1; 
-    const int TAR = 1; 
-    const int total_size = X * Y * DIR * TAR;
-
-    torch::Tensor all_moves = torch::zeros({total_size}, torch::kFloat32);
+    // Initialize to zero
+    for (int i = 0; i < total_size; ++i) {
+        output[i] = 0.0f;
+    }
 
     // Helper: convert (x,y) → flat index
     auto index = [&](int x, int y, int dir, int tar) -> int {
-        return x * Y + y;
+        return x * Y_ + y;
     };
     
     auto valid_moves = get_valid_moves(player);
     for (const auto& move : valid_moves) {
-        int idx = index(move[0], move[1], move[2], move[3]);
+        int idx = index(move.x, move.y, move.dir, move.tar);
         
         if (idx >= 0 && idx < total_size)
-            all_moves[idx] = 1.0f;
+            output[idx] = 1.0f;
     }
-
-    return all_moves;
 }
 
+
 void Board::display_board(std::ostream& os) const {
-    const int ROWS = 4;
-    const int COLS = 4;
 
     os << "    ";
-    for (int c = 0; c < COLS; ++c)
+    for (int c = 0; c < X_; ++c)
         os << static_cast<char>('A' + c) << "   ";
     os << "\n";
 
-    for (int r = 0; r < ROWS; ++r) {
+    for (int r = 0; r < X_; ++r) {
         os << (r + 1) << "   ";
-        for (int c = 0; c < COLS; ++c) {
+        for (int c = 0; c < Y_; ++c) {
             os << board[r][c];
-            if (c < COLS - 1)
+            if (c < Y_ - 1)
                 os << " | ";
         }
         os << "\n";
 
-        if (r < ROWS - 1) {
+        if (r < Y_ - 1) {
             os << "   ───┼───┼───┼───\n";
         }
     }

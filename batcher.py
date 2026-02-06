@@ -26,6 +26,7 @@ class Batch:
     board_states: np.ndarray            # [batch, INPUT_SIZE]
     legal_masks: np.ndarray             # [batch, POLICY_SIZE]
     
+    
     def __len__(self):
         return len(self.slots)
     
@@ -67,7 +68,8 @@ class InferenceBatcher:
     def __init__(
         self,
         max_batch_size: int = 32,
-        max_wait_ms: float = 5.0,
+        min_batch_size: int = 8,      # ADD THIS
+        max_wait_ms: float = 0.5,
         empty_wait_ms: float = 1.0
     ):
         """
@@ -77,6 +79,7 @@ class InferenceBatcher:
             empty_wait_ms: Time to wait when completely empty (milliseconds)
         """
         self.max_batch_size = max_batch_size
+        self.min_batch_size = min_batch_size
         self.max_wait_ms = max_wait_ms / 1000.0  # Convert to seconds
         self.empty_wait_ms = empty_wait_ms / 1000.0
         
@@ -89,24 +92,28 @@ class InferenceBatcher:
         """
         Collect a batch of requests from shared memory.
         
+        KataGo-style batching:
+        - Process immediately if batch >= MIN_BATCH_SIZE
+        - Or if waited MAX_WAIT_MS
+        - Brief sleep between scans
+        
         Args:
             shm: Shared memory interface
             
         Returns:
             Batch object (may be empty if no requests available)
         """
+        # Configuration
         slots = []
         job_ids = []
         board_states = []
         legal_masks = []
         
         start_time = time.time()
-        scan_count = 0
         
-        while len(slots) < self.max_batch_size:
+        while True:
             # Scan for READY requests
             ready_slots = shm.scan_ready_requests()
-            scan_count += 1
             
             # Try to claim each ready request
             for slot in ready_slots:
@@ -121,38 +128,36 @@ class InferenceBatcher:
                     board_states.append(board_state)
                     legal_masks.append(legal_mask)
             
-            # Decide if we should keep waiting
-            elapsed = time.time() - start_time
-            
-            if len(slots) == 0:
-                # No requests yet
-                if elapsed < self.empty_wait_ms:
-                    time.sleep(0.001)  # 1ms
-                else:
-                    # Timeout - no requests available
-                    self.empty_polls += 1
-                    break
-            
-            elif len(slots) < self.max_batch_size:
-                # Have some requests - wait for more
-                if elapsed < self.max_wait_ms:
-                    time.sleep(0.0005)  # 0.5ms
-                else:
-                    # Timeout - process what we have
-                    break
-            else:
-                # Full batch - process immediately
+            # Exit condition 1: Batch is full
+            if len(slots) >= self.max_batch_size:
                 break
-        
-        # Create batch object
-        if len(slots) == 0:
-            return Batch([], [], np.array([]), np.array([]))
+            
+            # Exit condition 2: Have minimum batch size
+            if len(slots) >= self.min_batch_size:
+                break
+            
+            # Exit condition 3: Timeout
+            elapsed_ms = (time.time() - start_time) * 1000
+            if elapsed_ms >= self.max_wait_ms:
+                if len(slots) > 0:
+                    # Have some requests - process them
+                    break
+                else:
+                    # No requests after timeout - return empty
+                    self.empty_polls += 1
+                    return Batch([], [], np.array([]), np.array([]))
+            
+            # Brief sleep before next scan
+            if len(slots) > 0:
+                time.sleep(0.0005)  # 500μs - waiting for more
+            else:
+                time.sleep(0.001)   # 1ms - idle
         
         # Update statistics
         self.total_batches_collected += 1
         self.total_requests_collected += len(slots)
         
-        # Stack arrays
+        # Stack arrays and create batch
         batch = Batch(
             slots=slots,
             job_ids=job_ids,

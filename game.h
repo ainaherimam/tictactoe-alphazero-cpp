@@ -2,125 +2,80 @@
 #define GAME_H
 
 #include <memory>
-
+#include <iostream>
+#include <cstring>
 #include "board.h"
 #include "cell_state.h"
 #include "player.h"
-#include "alphaz_model.h"
-
+#include "position_pool.h"
 
 /**
  * @class Game
- * @brief Represents a Tic Tac Toe game.
+ * @brief Manages a game session between two players with optional training data collection.
  * 
- * This class defines a complete Tic Tac Toe game, including the game board and the
- * two players. It handles the game loop, player turns, and game state
- * transitions and also Data collection.
+ * Handles game flow, move execution, player switching, and position collection for
+ * training. Supports both evaluation mode (no data collection) and training mode.
  */
 class Game {
- public:
-  /**
-   * @brief Constructs a Game object.
-   * 
-   * Initializes a new game with a specified board size and two
-   * players.
-   * 
-   * @param board_size The size of the game board.
-   * @param player_1 Unique pointer to the first player.
-   * @param player_2 Unique pointer to the second player.
-   * @param dataset Reference to the game dataset for storing game data.
-   * @param evaluation Flag for evaluation (default: false).
-   */
-  Game(int board_size, std::unique_ptr<Player> player_1,
-       std::unique_ptr<Player> player_2,
-       GameDataset& dataset, bool evaluation = false, Cell_state player_to_evaluate = Cell_state::Empty);
+public:
+    /**
+     * @brief Create a new Game instance.
+     * @param player_1 First player
+     * @param player_2 Second player
+     * @param pool Reference to position pool for training data collection
+     * @param is_evaluation If true, disables data collection and temperature adjustment (default: false)
+     */
+    Game(std::unique_ptr<Player> player_1,
+         std::unique_ptr<Player> player_2,
+         PositionPool& pool,
+         bool is_evaluation = false);
+ 
+    /**
+     * @brief Executes a complete game with data collection and temperature scheduling.
+     * @return The winner of the game (or Empty if draw/timeout)
+     */
+    Cell_state play();
 
-  /**
-   * @brief Converts a move array to its string representation.
-   * 
-   * @param moves Array of 4 integers representing a move.
-   * 
-   * @return String representation of the move.
-   */
-  std::string print_move(std::array<int, 4> moves);
-
-  /**
-   * @brief Starts and manages the game loop for Self Play.
-   * 
-   * This function contains the main game loop for Self Play and Data collection (no logs). It continues until a player
-   * wins.
-   * 
-   * @return The winning player's cell state. or '.' if dr
-   */
-  Cell_state play();
-
-  /**
-   * @brief Starts and manages  game loop for AI vs AI / Human vs Human / Human vs AI.
-   * 
-   * @return The winning player's cell state.
-   */
-  Cell_state simple_play();
-
-  bool is_policy_optimal(const torch::Tensor& policy_logits, 
-                       const torch::Tensor& minimax_logits,
-                       const torch::Tensor& legal_mask);
-
-          
-  /**
-  * @brief Read-only access to the current board
-  */
-  const Board& getBoard() const {
+    /**
+     * @brief Gets the move history of the game.
+     * @return Const reference to move history string
+     */
+    const std::string& get_move_history() const {
+        return move_history;
+    }
+    
+    /**
+     * @brief Gets the current board state.
+     * @return Const reference to the game board
+     */
+    const Board& getBoard() const {
         return board;
     }
 
-  float get_number_optimal_moves() const {
-    return optimal_moves;
-    }
+private:
+    Board board;                            ///< Game board
+    std::unique_ptr<Player> players[2];     ///< The two players
+    int current_player_index;               ///< Index of current player (0 fox X or 1 for O)
+    bool is_evaluation;                     ///< Evaluation mode flag (disables data collection)
+    std::string move_history;               ///< String record of all moves made
+    size_t current_game_moves_;             ///< Number of moves made in current game
+    
+    PositionPool& pool_;                    ///< Reference to position pool for data collection
 
-  float get_number_eval_moves() const {
-    return eval_moves;
-    }
-
-  void log_game(const std::string& event_name, 
-                    const std::string& p1_name, 
-                    const std::string& p2_name,
-                    Cell_state winner,
-                    std::string move_history);
-
-
+    /**
+     * @brief Switches to the other player.
+     */
+    void switch_player();
   
-
- private:
-  Board board;
-  std::unique_ptr<Player> players[2];
-  std::unique_ptr<Player> minimax_agent = std::make_unique<Minimax_player>(16, true, LogLevel::NONE);
-  int current_player_index;
-  std::vector<torch::Tensor> result_z;
-  bool evaluation = false;
-  Cell_state player_to_evaluate = Cell_state::Empty;
-  int optimal_moves;
-  int eval_moves;
-  std::string move_history;
-
-  /**
-   * @brief A cirular replay buffer
-   */
-  GameDataset& dataset_;
-
-  /**
-   * @brief Switches the current player.
-   * 
-   * This function switches the turn to the other player.
-   */
-  void switch_player();
-
-  /**
-   * @brief Executes a specified number of random moves on the current board.
-   * 
-   * @param random_move_number Number of random moves to perform.
-   */
-  void random_move(int random_move_number);
-
+    /**
+     * @brief Collects current position for training data.
+     * @param policy Pointer to policy array from neural network
+     * @param player_index Index of the player making the move
+     * @param move_number Current move number in the game
+     */
+    void collect_position(const float* policy,
+                          uint8_t player_index,
+                          uint16_t move_number);
 };
 
 #endif

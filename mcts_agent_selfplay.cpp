@@ -18,7 +18,7 @@ Mcts_agent_selfplay::Mcts_agent_selfplay(double exploration_factor,
                          float temperature,
                          float dirichlet_alpha,
                          float dirichlet_epsilon,
-                         std::shared_ptr<InferenceClient> client,
+                         std::shared_ptr<SharedMemoryInferenceQueue> queue,
                          int max_depth,
                          bool tree_reuse,
                          uint32_t model_id)
@@ -28,7 +28,7 @@ Mcts_agent_selfplay::Mcts_agent_selfplay(double exploration_factor,
       temperature(temperature),
       dirichlet_alpha(dirichlet_alpha),
       dirichlet_epsilon(dirichlet_epsilon),
-      client(client),
+      queue(queue),
       max_depth(max_depth),
       random_generator(std::random_device{}()),
       tree_reuse(tree_reuse),
@@ -121,7 +121,8 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
     board.to_float_array(current_player, input);
     board.get_legal_mask(current_player, mask);
 
-    client->evaluate_and_wait(input, mask, policy, &value);
+    uint64_t job_id = queue->submit(input, mask);
+    queue->wait(job_id, policy, &value);
     
     std::vector<std::pair<Move, float>> move_with_logit = get_moves_with_probs(policy);
 

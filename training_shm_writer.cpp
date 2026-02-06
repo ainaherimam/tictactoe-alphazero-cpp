@@ -83,6 +83,7 @@ void TrainingShmWriter::flush_game(const PositionPool& pool) {
         
         uint32_t slot = write_idx % max_capacity_;
         TrainingPosition& dst = positions_[slot];
+
         
         // Copy data
         std::memcpy(dst.board, src.board.data(), TRAINING_BOARD_SIZE * sizeof(float));
@@ -105,14 +106,13 @@ void TrainingShmWriter::flush_game(const PositionPool& pool) {
     // Increment generation
     header_->generation.fetch_add(1, std::memory_order_release);
 
-    static uint64_t total_games_flushed = 0;
-    total_games_flushed++;
+    static std::atomic<uint64_t> total_games_flushed{0};
+    uint64_t current_count = total_games_flushed.fetch_add(1, std::memory_order_relaxed) + 1;
 
-    if (total_games_flushed % 5 == 0) {
-        std::cout << "[TrainingShmWriter] Flushed " << total_games_flushed 
-                  << " games (" << num_moves << " moves), "
-                  << "buffer: " << new_size << "/" << max_capacity_ 
-                  << " positions" << std::endl;
+    if (current_count % 20 == 0) {  // Use current_count instead of total_games_flushed
+        std::cout << "[TrainingShmWriter] Flushed " << current_count 
+        << " Games - Buffer: " << new_size << "/" << max_capacity_ 
+        << " positions" << std::endl;
     }
 }
 

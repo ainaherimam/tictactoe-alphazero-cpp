@@ -249,6 +249,11 @@ class SharedMemoryInterface:
     def increment_batch_count(self):
         """Increment total batches processed"""
         self.buffer.total_batches_processed.value += 1
+
+    def notify_batch_complete(self):
+        """Increment notification counter to wake C++ waiters"""
+        current = self.buffer.notification_counter.value
+        self.buffer.notification_counter.value = current + 1
     
     # ========================================================================
     # DEBUGGING

@@ -134,12 +134,14 @@ def verify_sizes() -> bool:
 
 
 # ============================================================================
-# NUMPY VIEW CREATION
+# NUMPY VIEW CREATION - FIXED VERSION
 # ============================================================================
 
 def create_numpy_views(shm_buffer: memoryview, max_capacity: int) -> Dict[str, np.ndarray]:
     """
     Create NumPy views into the shared memory buffer.
+    
+    CRITICAL: Returns VIEWS not copies - changes in shared memory are visible!
     
     Args:
         shm_buffer: memoryview of the shared memory segment
@@ -152,77 +154,63 @@ def create_numpy_views(shm_buffer: memoryview, max_capacity: int) -> Dict[str, n
         - 'z': [max_capacity] float32
         - 'mask': [max_capacity, 16] float32
     """
-    # Calculate offsets
     header_size = ctypes.sizeof(TrainingBufferHeader)
     position_size = TRAINING_POSITION_BYTES
     
-    # Create a flat float32 array view of all positions
+    # Total size of all positions
     positions_offset = header_size
-    positions_size = max_capacity * position_size
+    positions_total_bytes = max_capacity * position_size
     
-    # Total floats in the position data
-    floats_per_position = (TRAINING_BOARD_SIZE + TRAINING_POLICY_SIZE + 1 + 
-                           TRAINING_POLICY_SIZE)  # board + pi + z + mask = 48 + 16 + 1 + 16 = 81
+    print(f"[create_numpy_views] Creating views with stride-based indexing...")
+    print(f"  Header size: {header_size} bytes")
+    print(f"  Position size: {position_size} bytes")
+    print(f"  Max capacity: {max_capacity}")
+    print(f"  Positions start at offset: {positions_offset}")
     
-    # But we have padding, so work with bytes instead
-    positions_bytes = np.frombuffer(
-        shm_buffer, 
-        dtype=np.uint8, 
-        count=positions_size, 
-        offset=positions_offset
+    # Create views using numpy's stride mechanism
+    # Each position is 384 bytes apart
+    
+    # BOARDS: shape=[max_capacity, 3, 4, 4], at offset 0 within each position
+    boards = np.ndarray(
+        shape=(max_capacity, 3, 4, 4),
+        dtype=np.float32,
+        buffer=shm_buffer,
+        offset=positions_offset + 0,  # board starts at offset 0 in position
+        strides=(position_size, 64, 16, 4)  # position stride, channel stride, row stride, element stride
     )
     
-    # Create structured views
-    boards_list = []
-    pi_list = []
-    z_list = []
-    mask_list = []
+    # PI: shape=[max_capacity, 16], at offset 192 within each position
+    pi = np.ndarray(
+        shape=(max_capacity, 16),
+        dtype=np.float32,
+        buffer=shm_buffer,
+        offset=positions_offset + 192,  # pi starts at offset 192 in position
+        strides=(position_size, 4)  # position stride, element stride
+    )
     
-    for i in range(max_capacity):
-        pos_offset = i * position_size
-        
-        # Board: 192 bytes (48 floats) at offset 0
-        board = np.frombuffer(
-            positions_bytes,
-            dtype=np.float32,
-            count=TRAINING_BOARD_SIZE,
-            offset=pos_offset
-        ).reshape(3, 4, 4)
-        boards_list.append(board)
-        
-        # Pi: 64 bytes (16 floats) at offset 192
-        pi = np.frombuffer(
-            positions_bytes,
-            dtype=np.float32,
-            count=TRAINING_POLICY_SIZE,
-            offset=pos_offset + 192
-        )
-        pi_list.append(pi)
-        
-        # Z: 4 bytes (1 float) at offset 256
-        z = np.frombuffer(
-            positions_bytes,
-            dtype=np.float32,
-            count=1,
-            offset=pos_offset + 256
-        )[0]
-        z_list.append(z)
-        
-        # Mask: 64 bytes (16 floats) at offset 260
-        mask = np.frombuffer(
-            positions_bytes,
-            dtype=np.float32,
-            count=TRAINING_POLICY_SIZE,
-            offset=pos_offset + 260
-        )
-        mask_list.append(mask)
+    # Z: shape=[max_capacity], at offset 256 within each position
+    z = np.ndarray(
+        shape=(max_capacity,),
+        dtype=np.float32,
+        buffer=shm_buffer,
+        offset=positions_offset + 256,  # z starts at offset 256 in position
+        strides=(position_size,)  # position stride
+    )
     
-    # Stack into arrays (these are views, not copies!)
+    # MASK: shape=[max_capacity, 16], at offset 260 within each position
+    mask = np.ndarray(
+        shape=(max_capacity, 16),
+        dtype=np.float32,
+        buffer=shm_buffer,
+        offset=positions_offset + 260,  # mask starts at offset 260 in position
+        strides=(position_size, 4)  # position stride, element stride
+    )
+    
     views = {
-        'boards': np.array(boards_list),      # [max_capacity, 3, 4, 4]
-        'pi': np.array(pi_list),              # [max_capacity, 16]
-        'z': np.array(z_list),                # [max_capacity]
-        'mask': np.array(mask_list),          # [max_capacity, 16]
+        'boards': boards,
+        'pi': pi,
+        'z': z,
+        'mask': mask,
     }
     
     return views

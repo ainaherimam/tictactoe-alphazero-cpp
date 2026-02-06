@@ -137,7 +137,8 @@ class SharedMemoryBuffer(ctypes.Structure):
         ('total_requests_completed', AtomicUInt64),             # 8 bytes
         ('total_batches_processed', AtomicUInt64),              # 8 bytes
         ('next_slot_hint', AtomicUInt32),                       # 4 bytes
-        ('_padding2', ctypes.c_uint8 * 28),                     # 28 bytes (cache line align)
+        ('notification_counter', AtomicUInt32),                 # 4 bytes
+        ('_padding2', ctypes.c_uint8 * 24),                     # 28 bytes (cache line align)
         
         # Request and response arrays
         ('requests', EvalRequest * MAX_BATCH_SIZE),

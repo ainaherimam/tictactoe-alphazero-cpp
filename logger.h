@@ -90,7 +90,7 @@ public:
      * @param move Array containing move coordinates [from_x, from_y, to_x, to_y]
      * @return Formatted move string
      */
-    std::string print_move(std::array<int, 4> move);
+    std::string print_move(Move move);
 
     // ========== MCTS Lifecycle Logging (Level 1 - STEPS_ONLY) ==========
     
@@ -119,7 +119,7 @@ public:
      * @param step_name Name of the step (e.g., "Selection", "Expansion")
      * @param move Move
      */
-    void log_step(const std::string& step_name, const std::array<int, 4>& move);
+    void log_step(const std::string& step_name, const Move& move);
     
     // ========== Neural Network Logging (Level 1 - STEPS_ONLY) ==========
     
@@ -130,7 +130,7 @@ public:
      * @param value_from_nn Value prediction from neural network
      * @param num_legal_moves Number of legal moves available
      */
-    void log_nn_evaluation(const std::array<int, 4>& move, float value_from_nn, int num_legal_moves);
+    void log_nn_evaluation(const Move& move, float value_from_nn, int num_legal_moves);
     
     /**
      * @brief Log node expansion details
@@ -138,7 +138,7 @@ public:
      * @param move Move that lead to the node that is expanded
      * @param num_children Number of child nodes created
      */
-    void log_expansion(const std::array<int, 4>& move, int num_children);
+    void log_expansion(const Move& move, int num_children);
     
     // ========== Selection Logging (Level 3 - SELECTION_ONLY and above) ==========
     
@@ -148,7 +148,7 @@ public:
      * @param move Move that lead to selected child
      * @param puct_score PUCT score used for selection
      */
-    void log_selected_child(const std::array<int, 4>& move, double puct_score);
+    void log_selected_child(const Move& move, double puct_score);
     
     /**
      * @brief Log detailed PUCT calculation components
@@ -160,7 +160,7 @@ public:
      * @param visits Visit count for this node
      * @param parent_visits Visit count for parent node
      */
-    void log_puct_details(const std::array<int, 4>& move, float q_value, 
+    void log_puct_details(const Move& move, float q_value, 
                           float u_value, float prior, int visits, int parent_visits);
     
     // ========== Simulation Logging (for Vanilla MCTS) ==========
@@ -171,7 +171,7 @@ public:
      * @param move Starting move for simulation
      * @param board Current board state
      */
-    void log_simulation_start(const std::array<int, 4>& move, const Board& board);
+    void log_simulation_start(const Move& move, const Board& board);
     
     /**
      * @brief Log a step during simulation for Vanilla MCTS(legacy method)
@@ -181,7 +181,7 @@ public:
      * @param move Move being made
      */
     void log_simulation_step(Cell_state current_player, const Board& board,
-                             const std::array<int, 4>& move);
+                             const Move& move);
     
     /**
      * @brief Log the end of simulation (legacy method)
@@ -198,7 +198,7 @@ public:
      * @param move Move that lead to the node where backpropagation starts
      * @param value Value being backpropagated
      */
-    void log_backpropagation_start(const std::array<int, 4>& move, float value);
+    void log_backpropagation_start(const Move& move, float value);
     
     /**
      * @brief Log backpropagation update results
@@ -207,7 +207,7 @@ public:
      * @param acc_value Accumulated value after update
      * @param visit_count Visit count after update
      */
-    void log_backpropagation_result(const std::array<int, 4>& move,
+    void log_backpropagation_result(const Move& move,
                                     float acc_value, int visit_count);
     
     // ========== Root Statistics Logging (Level 4 - ROOT_STATS and above) ==========
@@ -228,9 +228,9 @@ public:
      * @param visit_count Visit count for child
      * @param prior_proba Prior probability from neural network
      */
-    void log_child_node_stats(const std::array<int, 4>& move,
-                              float acc_value, int visit_count, 
-                              float prior_proba);
+    void log_child_node_stats(const Move& move,
+                                  float acc_value, int visit_count, 
+                                  float prior_proba, float nn_value);
     
     // ========== Final Decision Logging (Level 1 - STEPS_ONLY and above) ==========
     
@@ -250,7 +250,7 @@ public:
      * @param visits Visit count of selected move
      */
     void log_best_child_chosen(int iteration_counter,
-                               const std::array<int, 4>& move,
+                               const Move& move,
                                float avg_value, int visits);
     
     // ========== Dirichlet Noise Logging (Level 5 - EVERYTHING) ==========

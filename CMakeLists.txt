@@ -4,6 +4,7 @@ project(AlphaZero_TTT LANGUAGES CXX)
 # ============================================================
 # === Global Configuration ==================================
 # ============================================================
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -15,26 +16,55 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # ============================================================
+# === Triton Client =========================================
+# ============================================================
+
+# Auto-detect Triton client directory (relative to project root)
+# Priority: 1. ENV variable, 2. Local triton_client/, 3. User home, 4. Fallback
+if(DEFINED ENV{TRITON_CLIENT_DIR})
+    set(TRITON_CLIENT_DIR $ENV{TRITON_CLIENT_DIR})
+    message(STATUS "Using Triton from environment: ${TRITON_CLIENT_DIR}")
+elseif(EXISTS "${CMAKE_SOURCE_DIR}/triton_client")
+    set(TRITON_CLIENT_DIR "/home/aina/Documents/MCTS-Fanorona/github/tictactoe-alphazero-cpp/triton_client")
+    message(STATUS "Using local Triton installation: ${TRITON_CLIENT_DIR}")
+elseif(EXISTS "$ENV{HOME}/triton_client")
+    set(TRITON_CLIENT_DIR "/home/aina/Documents/MCTS-Fanorona/github/tictactoe-alphazero-cpp/triton_client")
+    message(STATUS "Using Triton from home directory: ${TRITON_CLIENT_DIR}")
+else()
+    # Fallback to hardcoded path (will be updated by install script)
+    set(TRITON_CLIENT_DIR "/home/aina/Documents/MCTS-Fanorona/github/tictactoe-alphazero-cpp/triton_client")
+    message(WARNING "Using fallback Triton path: ${TRITON_CLIENT_DIR}")
+    message(WARNING "Run install_and_setup.sh to auto-configure Triton client")
+endif()
+
+# Verify Triton client exists
+if(NOT EXISTS "${TRITON_CLIENT_DIR}/include")
+    message(FATAL_ERROR 
+        "Triton client not found at: ${TRITON_CLIENT_DIR}\n"
+        "Please run: ./install_and_setup.sh\n"
+        "Or set TRITON_CLIENT_DIR environment variable"
+    )
+endif()
+
+include_directories(${TRITON_CLIENT_DIR}/include)
+link_directories(${TRITON_CLIENT_DIR}/lib)
+
+# ============================================================
 # === Dependencies ==========================================
 # ============================================================
 
-# ---- Boost -------------------------------------------------
 find_package(Boost REQUIRED COMPONENTS system)
-
-# ---- Threads ----------------------------------------------
 find_package(Threads REQUIRED)
-
-# ---- OpenSSL (optional) -----------------------------------
 find_package(OpenSSL)
 
 # ============================================================
-# === Shared Memory Inference (Header-only) =================
+# === Shared Memory Inference (INTERFACE) ===================
 # ============================================================
 
 add_library(shared_memory_inference INTERFACE)
 
 target_include_directories(shared_memory_inference INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
     ${Boost_INCLUDE_DIRS}
 )
 
@@ -56,52 +86,65 @@ endif()
 # ============================================================
 
 add_library(az_core
-    board.cpp
-    game.cpp
-    position_pool.cpp
-    cell_state.cpp
-    player.cpp
-    logger.cpp
-    mcts_agent_selfplay.cpp
-    inference_queue_shm.cpp
-    training_shm_writer.cpp
+    # ---- Game ------------------------------------------------
+    src/core/game/board.cpp
+    src/core/game/game.cpp
+    src/core/game/cell_state.cpp
+    src/core/game/player.cpp
+
+    # ---- MCTS ------------------------------------------------
+    src/core/mcts/mcts_agent_selfplay.cpp
+    src/core/mcts/mcts_agent_triton.cpp
+    src/core/mcts/position_pool.cpp
+
+    # ---- Utils ----------------------------------------------
+    src/core/utils/logger.cpp
+
+    # ---- Inference ------------------------------------------
+    src/inference/shared_memory/inference_queue_shm.cpp
+    src/inference/triton/triton_inference_client.cpp
+
+    # ---- Training -------------------------------------------
+    src/training/training_shm_writer.cpp
 )
 
 target_include_directories(az_core PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
 )
 
 target_link_libraries(az_core PUBLIC
     shared_memory_inference
     Threads::Threads
+    grpcclient
 )
 
 # ============================================================
-# === Main Executable =======================================
+# === Executables ===========================================
 # ============================================================
 
 add_executable(AlphaZero_TTT
-    main.cpp
+    executables/main.cpp
 )
 
-target_link_libraries(AlphaZero_TTT PRIVATE
-    az_core
+add_executable(AZ_Triton_TTT
+    executables/main_triton.cpp
 )
-
-# ============================================================
-# === Eval Executable =======================================
-# ============================================================
 
 add_executable(AlphaZero_TTT_Eval
-    eval.cpp
+    executables/eval.cpp
 )
 
-target_link_libraries(AlphaZero_TTT_Eval PRIVATE
-    az_core
+add_executable(AZ_Triton_TTT_Eval
+    executables/eval_triton.cpp
 )
+
+target_link_libraries(AlphaZero_TTT PRIVATE az_core)
+target_link_libraries(AZ_Triton_TTT PRIVATE az_core)
+target_link_libraries(AlphaZero_TTT_Eval PRIVATE az_core)
+target_link_libraries(AZ_Triton_TTT_Eval PRIVATE az_core)
 
 # ============================================================
-# === Compiler Flags (Performance) ==========================
+# === Compiler Flags ========================================
 # ============================================================
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -115,16 +158,19 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 # ============================================================
-# === RPATH (Linux/macOS) ===================================
+# === RPATH =================================================
 # ============================================================
 
-set_property(TARGET AlphaZero_TTT PROPERTY
-    INSTALL_RPATH_USE_LINK_PATH TRUE
+foreach(target
+    AlphaZero_TTT
+    AlphaZero_TTT_Eval
+    AZ_Triton_TTT
+    AZ_Triton_TTT_Eval
 )
-
-set_property(TARGET AlphaZero_TTT_Eval PROPERTY
-    INSTALL_RPATH_USE_LINK_PATH TRUE
-)
+    set_property(TARGET ${target}
+        PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE
+    )
+endforeach()
 
 # ============================================================
 # === Installation (Optional) ===============================
@@ -133,37 +179,24 @@ set_property(TARGET AlphaZero_TTT_Eval PROPERTY
 install(TARGETS
     AlphaZero_TTT
     AlphaZero_TTT_Eval
-    RUNTIME DESTINATION bin
-)
-
-install(FILES
-    inference_server.py
-    alphazero_model.py
-    DESTINATION bin
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                GROUP_READ GROUP_EXECUTE
-                WORLD_READ WORLD_EXECUTE
+    AZ_Triton_TTT
+    AZ_Triton_TTT_Eval
 )
 
 # ============================================================
-# === Configuration Summary =================================
+# === Summary ===============================================
 # ============================================================
 
 message(STATUS "")
-message(STATUS "=== AlphaZero JAX Configuration ===")
+message(STATUS "=== AlphaZero Configuration ===")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "Triton Client: ${TRITON_CLIENT_DIR}")
 message(STATUS "Boost version: ${Boost_VERSION}")
-message(STATUS "Threads: ${CMAKE_THREAD_LIBS_INIT}")
-message(STATUS "Output directory: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
-message(STATUS "")
-message(STATUS "Shared Memory System: ENABLED")
-message(STATUS "  - Header-only shared memory library")
-message(STATUS "  - JAX Python inference server required")
-message(STATUS "")
+message(STATUS "Runtime output: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "Executables:")
-message(STATUS "  - AlphaZero_TTT (main self-play)")
-message(STATUS "  - AlphaZero_TTT_
- (eval harness)")
-message(STATUS "====================================")
+message(STATUS "  - AlphaZero_TTT")
+message(STATUS "  - AlphaZero_TTT_Eval")
+message(STATUS "  - AZ_Triton_TTT")
+message(STATUS "  - AZ_Triton_TTT_Eval")
 message(STATUS "")

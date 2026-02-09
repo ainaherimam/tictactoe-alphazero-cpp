@@ -17,43 +17,36 @@ Tic-Tac-Toe is a classic two-player strategy game played on a traditional 3x3 gr
 ## 🚀 Features
 - **Neural Network-Guided MCTS**: MCTS algorithm with neural network policy and value predictions
 - **Self-Play Training**: AlphaZero selfplay loop
-
+- **Vizualize Training with html/css/java/**: A web app to see training statistics and games generated
 ---
 
 ## 🛠️ Getting Started
 
 ## Prerequisites
-- **C++20 Compiler** (GCC 10+, Clang 10+, MSVC 2019+)
-- **CMake 3.20+**
+* **C++20 Compiler** (GCC 10+, Clang 10+)
+* **CMake 3.15+**
+* **Python 3.11 or 3.12**
+* **NVIDIA Triton Client** (auto-installed by script)
 
 ## Installation
 ```sh
 # Clone repository
 git clone https://github.com/yourusername/tictactoe-alphazero-cpp.git && cd tictactoe-alphazero-cpp
 
-# Create build directory
-mkdir build && cd build
-
-# Configure and build
-cmake - ..
-make -j$(nproc)
-
-# Create a virtual environment (if you don’t have one yet)
-python -m venv venv
-
-# Activate it
-source venv/bin/activate   # Linux / macOS
-# venv\Scripts\activate    # Windows
-
-# Upgrade pip
-python -m pip install --upgrade pip
-
-# Install dependencies
-pip install -r requirements.txt
+# install triton, creates venv, builds C++
+./install_and_setup.sh
 
 # Run inference server
-python inference_server.py
+./run_triton.sh 
+or 
+./run_inference_server.sh
 
 # Run selfplay
-python ./AlphaZero_TTT
+./AZ_Triton_TTT
+or 
+./AlphaZero_TTT
+
+# Run training
+./run_train.sh
 ---
+

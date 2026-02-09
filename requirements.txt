@@ -1,6 +1,7 @@
-pip>=23.0
 jax
 jaxlib
 numpy
 flax
 optax
+nvidia-pytriton
+orbax-checkpoint

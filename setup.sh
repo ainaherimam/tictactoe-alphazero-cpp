@@ -12,9 +12,26 @@ TRITON_VERSION="2.50.0"
 
 # Parse command line arguments
 FORCE_INSTALL=false
-if [[ "$1" == "--force" ]] || [[ "$1" == "-f" ]]; then
-    FORCE_INSTALL=true
-    echo "⚠ Force mode enabled - will reinstall everything"
+SKIP_VENV_ARG=false
+
+for arg in "$@"; do
+    if [[ "$arg" == "--force" ]] || [[ "$arg" == "-f" ]]; then
+        FORCE_INSTALL=true
+        echo "⚠ Force mode enabled - will reinstall everything"
+        echo ""
+    elif [[ "$arg" == "--no-venv" ]]; then
+        SKIP_VENV_ARG=true
+        echo "ℹ️  Skipping virtual environment creation (--no-venv flag)"
+        echo ""
+    fi
+done
+
+# Detect Google Colab environment
+IS_COLAB=false
+if [ -n "$COLAB_GPU" ] || [ -d "/content" ] && [ -f "/usr/local/lib/python*/dist-packages/google/colab/__init__.py" ] 2>/dev/null; then
+    IS_COLAB=true
+    SKIP_VENV_ARG=true
+    echo "✓ Google Colab environment detected - skipping venv creation"
     echo ""
 fi
 
@@ -35,17 +52,22 @@ if [ "$FORCE_INSTALL" = false ]; then
         fi
     fi
 
-    # Check if venv exists and has required packages
-    if [ -d "venv" ] && [ -f "venv/bin/activate" ]; then
-        source venv/bin/activate
-        if python -c "import jax" 2>/dev/null; then
-            echo "✓ Python virtual environment already set up with JAX"
-            SKIP_VENV=true
-        else
-            echo "⚠ Virtual environment exists but missing packages"
+    # Check if venv exists and has required packages (skip check if --no-venv or Colab)
+    if [ "$SKIP_VENV_ARG" = false ]; then
+        if [ -d "venv" ] && [ -f "venv/bin/activate" ]; then
+            source venv/bin/activate
+            if python -c "import jax" 2>/dev/null; then
+                echo "✓ Python virtual environment already set up with JAX"
+                SKIP_VENV=true
+            else
+                echo "⚠ Virtual environment exists but missing packages"
+                deactivate 2>/dev/null || true
+            fi
             deactivate 2>/dev/null || true
         fi
-        deactivate 2>/dev/null || true
+    else
+        # Skip venv entirely if --no-venv flag or Colab
+        SKIP_VENV=true
     fi
 
     # Check if build artifacts exist
@@ -254,7 +276,6 @@ if [ "$SKIP_VENV" = false ]; then
         fi
         
         echo "  ✓ Python packages installed!"
-        echo "  ✓ Python packages installed!"
     else
         echo "  ⚠ Warning: requirements.txt not found, skipping Python package installation"
     fi
@@ -264,14 +285,34 @@ if [ "$SKIP_VENV" = false ]; then
     echo ""
 else
     echo "================================================================"
-    echo "STEP 2/3: Python Virtual Environment [SKIPPED - Already Set Up]"
+    echo "STEP 2/3: Python Virtual Environment [SKIPPED]"
     echo "================================================================"
     echo ""
     
-    # Still activate it for potential use later
-    if [ -f "venv/bin/activate" ]; then
-        source venv/bin/activate
+    if [ "$IS_COLAB" = true ]; then
+        echo "  Google Colab detected - using system Python environment"
+        echo ""
+        
+        # Install packages directly in Colab
+        if [ -f "requirements.txt" ]; then
+            echo "→ Installing Python packages in Colab environment..."
+            pip install -q -r requirements.txt
+            echo "  ✓ Python packages installed!"
+        fi
+    elif [ "$SKIP_VENV_ARG" = true ]; then
+        echo "  Using system Python environment (--no-venv flag)"
+        echo ""
+        
+        # Install packages in system Python if requirements.txt exists
+        if [ -f "requirements.txt" ]; then
+            echo "→ Installing Python packages in system environment..."
+            pip install -r requirements.txt
+            echo "  ✓ Python packages installed!"
+        fi
+    else
+        echo "  Already configured"
     fi
+    echo ""
 fi
 
 # ============================================================
@@ -378,6 +419,7 @@ fi
 if [ -f "AZ_Triton_TTT_Eval" ]; then
     echo "  ✓ AZ_Triton_TTT_Eval"
 fi
+echo ""
 echo ""
 echo "To use the environment:"
 echo "  1. Run 'run_triton.sh' or 'run_inference_server.sh' as server"

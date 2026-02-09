@@ -34,7 +34,7 @@ Tic-Tac-Toe is a classic two-player strategy game played on a traditional 3x3 gr
 git clone https://github.com/yourusername/tictactoe-alphazero-cpp.git && cd tictactoe-alphazero-cpp
 
 # install triton, creates venv, builds C++
-./install_and_setup.sh
+./setup.sh
 
 # Run inference server
 ./run_triton.sh 

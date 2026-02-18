@@ -1,4 +1,5 @@
 #include "training/training_shm_writer.h"
+#include "core/game/constants.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -72,7 +73,17 @@ TrainingShmWriter::~TrainingShmWriter() {
 void TrainingShmWriter::flush_game(const PositionPool& pool) {
     size_t num_moves = pool.size();
     if (num_moves == 0) return;
-    
+
+    // Catch any struct layout mismatch at compile time.
+    // If Position and TrainingPosition field sizes don't agree,
+    // memcpy will silently copy the wrong bytes and corrupt the SHM data.
+    static_assert(sizeof(TrainingPosition::board) == INPUT_SIZE * sizeof(float),
+                  "TrainingPosition::board must be 3*16 floats (48 floats)");
+    static_assert(sizeof(TrainingPosition::pi)    == BOARD_CELLS * sizeof(float),
+                  "TrainingPosition::pi must be 16 floats");
+    static_assert(sizeof(TrainingPosition::mask)  == BOARD_CELLS * sizeof(float),
+                  "TrainingPosition::mask must be 16 floats");
+
     std::lock_guard<std::mutex> lock(write_mutex_);
     
     // Load write index once
@@ -84,12 +95,13 @@ void TrainingShmWriter::flush_game(const PositionPool& pool) {
         uint32_t slot = write_idx % max_capacity_;
         TrainingPosition& dst = positions_[slot];
 
-        
-        // Copy data
-        std::memcpy(dst.board, src.board.data(), TRAINING_BOARD_SIZE * sizeof(float));
-        std::memcpy(dst.pi, src.policy.data(), TRAINING_POLICY_SIZE * sizeof(float));
+        // Explicit byte counts — never rely on TRAINING_BOARD_SIZE being correct.
+        // board: 3 planes * 16 cells = 48 floats
+        // pi/mask: 16 floats each
+        std::memcpy(dst.board, src.board.data(),   sizeof(dst.board));
+        std::memcpy(dst.pi,    src.policy.data(),  sizeof(dst.pi));
         dst.z = src.z;
-        std::memcpy(dst.mask, src.mask.data(), TRAINING_POLICY_SIZE * sizeof(float));
+        std::memcpy(dst.mask,  src.mask.data(),    sizeof(dst.mask));
         
         write_idx = (write_idx + 1) % max_capacity_;
     }

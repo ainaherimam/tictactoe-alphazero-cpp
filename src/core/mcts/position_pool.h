@@ -14,7 +14,7 @@
  * Used for collecting training data during self-play.
  */
 struct Position {
-    std::array<float, BOARD_SIZE> board;      ///< board state
+    std::array<float, INPUT_SIZE> board;      ///< board state
     std::array<float, POLICY_SIZE> policy;    ///< policy distribution from mcts
     std::array<float, POLICY_SIZE> mask;      ///< legal move mask (1.0 = legal, 0.0 = illegal)
     float z;                                  ///< Game outcome z

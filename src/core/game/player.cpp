@@ -38,6 +38,7 @@ std::pair<Move, std::vector<float>> Human_player::choose_move(const Board& board
   return {{ -1, -1, -1, -1 }, dummy};  // should never reach this
 }
 
+
 Mcts_player_selfplay::Mcts_player_selfplay(const Mcts_config& config)
     : exploration_factor(config.exploration_factor),
       number_iteration(config.number_iteration),
@@ -143,9 +144,7 @@ float Mcts_player_selfplay::get_dirichlet_epsilon() const {
   return dirichlet_epsilon;
 }
 
-// ============================================================================
-// Mcts_player_triton Implementation
-// ============================================================================
+
 
 Mcts_player_triton::Mcts_player_triton(const Mcts_triton_config& config)
     : exploration_factor(config.exploration_factor),

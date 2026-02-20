@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MISÈRE 4×4 — Neural Tic-Tac-Toe</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3f;
+    --accent-x: #ff4560;
+    --accent-o: #00c9a7;
+    --accent-warn: #ffd166;
+    --text: #e8e8f0;
+    --text-dim: #6b6b88;
+    --glow-x: rgba(255, 69, 96, 0.25);
+    --glow-o: rgba(0, 201, 167, 0.25);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  /* Animated background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(42,42,63,0.3) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(42,42,63,0.3) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 900px;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+  }
+  header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 3rem;
+    letter-spacing: 3px;
+    background: linear-gradient(135deg, var(--accent-x), var(--accent-o));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  header .subtitle {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    line-height: 1.6;
+  }
+
+  /* Main layout */
+  .main-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 20px;
+  }
+
+  @media (max-width: 700px) {
+    .main-layout { grid-template-columns: 1fr; }
+    header h1 { font-size: 2rem; }
+  }
+
+  /* Turn indicator */
+  .turn-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .turn-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .turn-player {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.8rem;
+    letter-spacing: 2px;
+    transition: color 0.3s;
+  }
+  .turn-player.X { color: var(--accent-x); text-shadow: 0 0 20px var(--glow-x); }
+  .turn-player.O { color: var(--accent-o); text-shadow: 0 0 20px var(--glow-o); }
+
+  .rule-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--accent-warn);
+    background: rgba(255,209,102,0.1);
+    border: 1px solid rgba(255,209,102,0.3);
+    padding: 4px 10px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* Board */
+  .board-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    aspect-ratio: 1;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  .cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.1s, box-shadow 0.2s;
+    aspect-ratio: 1;
+    flex-direction: column;
+  }
+
+  .cell:hover:not(.taken):not(.game-over) {
+    border-color: var(--text-dim);
+    transform: scale(1.03);
+  }
+
+  .cell.taken { cursor: default; }
+
+  .cell .piece {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2rem;
+    line-height: 1;
+    z-index: 2;
+    transition: all 0.15s;
+  }
+  .cell .piece.X { color: var(--accent-x); text-shadow: 0 0 12px var(--glow-x); }
+  .cell .piece.O { color: var(--accent-o); text-shadow: 0 0 12px var(--glow-o); }
+
+  /* AI overlay on cells */
+  .cell .ai-bg {
+    position: absolute;
+    inset: 0;
+    border-radius: 9px;
+    opacity: 0;
+    transition: opacity 0.4s;
+    z-index: 0;
+  }
+
+  .cell .ai-prob {
+    position: absolute;
+    bottom: 4px;
+    right: 5px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    color: rgba(255,255,255,0.7);
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+  }
+
+  .cell.ai-shown .ai-bg { opacity: 1; }
+  .cell.ai-shown .ai-prob { opacity: 1; }
+
+  /* Losing line highlight */
+  .cell.losing {
+    animation: lose-pulse 0.6s ease-in-out 2;
+  }
+  @keyframes lose-pulse {
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: 0 0 20px var(--accent-x), inset 0 0 10px rgba(255,69,96,0.2); }
+  }
+
+  /* Game over overlay */
+  .game-result {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    text-align: center;
+  }
+  .game-result.visible { display: block; }
+  .game-result .winner-text {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2rem;
+    letter-spacing: 3px;
+  }
+  .game-result .winner-text.X { color: var(--accent-o); } /* X loses → O wins */
+  .game-result .winner-text.O { color: var(--accent-x); }
+  .game-result .winner-text.draw { color: var(--accent-warn); }
+  .game-result .sub {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn:hover { border-color: var(--text-dim); background: var(--surface); }
+
+  .btn-ai {
+    border-color: var(--accent-o);
+    color: var(--accent-o);
+    background: rgba(0,201,167,0.08);
+    flex: 1;
+  }
+  .btn-ai:hover { background: rgba(0,201,167,0.15); box-shadow: 0 0 12px var(--glow-o); }
+  .btn-ai:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-ai.loading { animation: pulse-btn 0.8s ease-in-out infinite; }
+  @keyframes pulse-btn {
+    0%,100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+
+  .btn-reset { color: var(--accent-warn); border-color: rgba(255,209,102,0.4); }
+  .btn-reset:hover { background: rgba(255,209,102,0.08); }
+
+  /* Sidebar */
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* AI Value Panel */
+  .value-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    display: none;
+  }
+  .value-panel.visible { display: block; }
+
+  .value-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+  }
+
+  .value-display {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 3.5rem;
+    line-height: 1;
+    text-align: center;
+    letter-spacing: 2px;
+    transition: color 0.4s;
+  }
+  .value-good { color: var(--accent-o); text-shadow: 0 0 30px var(--glow-o); }
+  .value-bad { color: var(--accent-x); text-shadow: 0 0 30px var(--glow-x); }
+  .value-neutral { color: var(--accent-warn); }
+
+  .value-interp {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin-top: 6px;
+    font-style: italic;
+  }
+
+  .value-bar-wrap {
+    margin-top: 12px;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .value-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease, background 0.5s;
+  }
+
+  /* Triton config */
+  .config-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .config-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+  .config-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .config-row label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+  .config-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    padding: 5px 10px;
+    width: 150px;
+    outline: none;
+  }
+  .config-input:focus { border-color: var(--accent-o); }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim);
+    display: inline-block; margin-right: 6px;
+    transition: background 0.3s;
+  }
+  .status-dot.ok { background: var(--accent-o); box-shadow: 0 0 6px var(--glow-o); }
+  .status-dot.err { background: var(--accent-x); }
+  .status-dot.loading { background: var(--accent-warn); animation: pulse-btn 0.8s infinite; }
+  .status-text { font-size: 0.7rem; color: var(--text-dim); }
+
+  /* Move history */
+  .history-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    flex: 1;
+  }
+  .history-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+  }
+  .history-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .history-item {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+  }
+  .history-item.X { color: var(--accent-x); border-color: rgba(255,69,96,0.3); background: rgba(255,69,96,0.07); }
+  .history-item.O { color: var(--accent-o); border-color: rgba(0,201,167,0.3); background: rgba(0,201,167,0.07); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--surface2); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>MISÈRE 4×4</h1>
+    <div class="subtitle">Neural Tic-Tac-Toe<br>3-in-a-row LOSES</div>
+  </header>
+
+  <div class="main-layout">
+    <!-- Left: board + controls -->
+    <div class="board-wrap">
+      <div class="turn-bar">
+        <div>
+          <div class="turn-label">Current Turn</div>
+          <div class="turn-player X" id="turnPlayer">X</div>
+        </div>
+        <div class="rule-badge">3 in a row = LOSE</div>
+      </div>
+
+      <div class="board" id="board"></div>
+
+      <div class="game-result" id="gameResult">
+        <div class="winner-text" id="winnerText"></div>
+        <div class="sub" id="winnerSub"></div>
+      </div>
+
+      <div class="controls">
+        <button class="btn btn-ai" id="btnAI" onclick="requestAI()">⚡ Ask AI</button>
+        <button class="btn btn-reset" onclick="resetGame()">↺ Reset</button>
+      </div>
+    </div>
+
+    <!-- Right: sidebar -->
+    <div class="sidebar">
+      <!-- AI Value -->
+      <div class="value-panel" id="valuePanel">
+        <div class="value-label">🧠 Neural Value — Current Player</div>
+        <div class="value-display" id="valueDisplay">—</div>
+        <div class="value-interp" id="valueInterp"></div>
+        <div class="value-bar-wrap">
+          <div class="value-bar" id="valueBar" style="width:50%"></div>
+        </div>
+      </div>
+
+      <!-- Triton config -->
+      <div class="config-panel">
+        <div class="config-title">⚙ Proxy → Triton</div>
+        <div class="config-row">
+          <label>Host:Port</label>
+          <input class="config-input" id="tritonHost" value="http://localhost:5555" placeholder="http://localhost:5555">
+        </div>
+        <div style="margin-top:8px; display:flex; align-items:center;">
+          <span class="status-dot" id="statusDot"></span>
+          <span class="status-text" id="statusText">Not connected</span>
+        </div>
+      </div>
+
+      <!-- Move history -->
+      <div class="history-panel">
+        <div class="history-title">📜 Move History</div>
+        <div class="history-list" id="historyList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// GAME STATE
+// ============================================================
+const BOARD_SIZE = 4;
+const EMPTY = null;
+let board = Array(16).fill(EMPTY);  // flat [16]
+let currentPlayer = 'X';
+let gameOver = false;
+let moveHistory = [];
+let aiShowing = false;
+
+// ============================================================
+// BOARD RENDERING
+// ============================================================
+function initBoard() {
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = '';
+  for (let i = 0; i < 16; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.id = `cell-${i}`;
+    cell.innerHTML = `
+      <div class="ai-bg" id="ai-bg-${i}"></div>
+      <span class="piece" id="piece-${i}"></span>
+      <span class="ai-prob" id="ai-prob-${i}"></span>
+    `;
+    cell.addEventListener('click', () => handleCellClick(i));
+    boardEl.appendChild(cell);
+  }
+}
+
+function renderBoard() {
+  for (let i = 0; i < 16; i++) {
+    const cell = document.getElementById(`cell-${i}`);
+    const piece = document.getElementById(`piece-${i}`);
+    const v = board[i];
+    if (v) {
+      piece.textContent = v;
+      piece.className = `piece ${v}`;
+      cell.classList.add('taken');
+    } else {
+      piece.textContent = '';
+      piece.className = 'piece';
+      cell.classList.remove('taken');
+    }
+    if (gameOver) cell.classList.add('game-over');
+    else cell.classList.remove('game-over');
+  }
+  // Turn indicator
+  if (!gameOver) {
+    const tp = document.getElementById('turnPlayer');
+    tp.textContent = currentPlayer;
+    tp.className = `turn-player ${currentPlayer}`;
+  }
+}
+
+// ============================================================
+// GAME LOGIC — Misère: 3-in-a-row LOSES
+// ============================================================
+function getLines() {
+  const lines = [];
+  // Rows
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c <= 1; c++) {
+      lines.push([r*4+c, r*4+c+1, r*4+c+2]);
+    }
+  }
+  // Cols
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r <= 1; r++) {
+      lines.push([r*4+c, (r+1)*4+c, (r+2)*4+c]);
+    }
+  }
+  // Diag top-left
+  for (let r = 0; r <= 1; r++) {
+    for (let c = 0; c <= 1; c++) {
+      lines.push([r*4+c, (r+1)*4+c+1, (r+2)*4+c+2]);
+    }
+  }
+  // Diag top-right
+  for (let r = 0; r <= 1; r++) {
+    for (let c = 2; c < 4; c++) {
+      lines.push([r*4+c, (r+1)*4+c-1, (r+2)*4+c-2]);
+    }
+  }
+  return lines;
+}
+
+const LINES = getLines();
+
+function checkLoser() {
+  // Returns the player who formed 3 in a row (that player LOSES)
+  for (const [a, b, c] of LINES) {
+    if (board[a] && board[a] === board[b] && board[b] === board[c]) {
+      return { loser: board[a], line: [a, b, c] };
+    }
+  }
+  return null;
+}
+
+function isDraw() {
+  return board.every(c => c !== EMPTY);
+}
+
+function handleCellClick(idx) {
+  if (gameOver || board[idx] !== EMPTY) return;
+  placeMove(idx, currentPlayer);
+}
+
+function placeMove(idx, player) {
+  board[idx] = player;
+  moveHistory.push({ player, idx, move: moveNumber(idx) });
+  renderBoard();
+  addHistory(player, idx);
+
+  const result = checkLoser();
+  if (result) {
+    endGame(result);
+  } else if (isDraw()) {
+    endGame(null);
+  } else {
+    currentPlayer = player === 'X' ? 'O' : 'X';
+    clearAIOverlay();
+  }
+}
+
+function moveNumber(idx) {
+  const r = Math.floor(idx / 4) + 1;
+  const c = (idx % 4) + 1;
+  return `R${r}C${c}`;
+}
+
+function endGame(result) {
+  gameOver = true;
+  const resultEl = document.getElementById('gameResult');
+  const winnerText = document.getElementById('winnerText');
+  const winnerSub = document.getElementById('winnerSub');
+  resultEl.classList.add('visible');
+
+  if (!result) {
+    winnerText.textContent = 'DRAW';
+    winnerText.className = 'winner-text draw';
+    winnerSub.textContent = 'No three in a row — board full';
+  } else {
+    const { loser, line } = result;
+    const winner = loser === 'X' ? 'O' : 'X';
+    winnerText.textContent = `${winner} WINS`;
+    winnerText.className = `winner-text ${loser}`;
+    winnerSub.textContent = `${loser} formed 3-in-a-row and loses!`;
+    // Highlight losing cells
+    line.forEach(i => document.getElementById(`cell-${i}`).classList.add('losing'));
+  }
+
+  const tp = document.getElementById('turnPlayer');
+  tp.textContent = result ? (result.loser === 'X' ? 'O' : 'X') + ' WIN' : 'DRAW';
+
+  document.getElementById('btnAI').disabled = true;
+}
+
+function addHistory(player, idx) {
+  const list = document.getElementById('historyList');
+  const item = document.createElement('div');
+  item.className = `history-item ${player}`;
+  item.textContent = `${player}:${moveNumber(idx)}`;
+  list.appendChild(item);
+  list.scrollTop = list.scrollHeight;
+}
+
+function resetGame() {
+  board = Array(16).fill(EMPTY);
+  currentPlayer = 'X';
+  gameOver = false;
+  moveHistory = [];
+  aiShowing = false;
+
+  document.getElementById('gameResult').classList.remove('visible');
+  document.getElementById('historyList').innerHTML = '';
+  document.getElementById('valuePanel').classList.remove('visible');
+  document.getElementById('btnAI').disabled = false;
+
+  const tp = document.getElementById('turnPlayer');
+  tp.textContent = 'X';
+  tp.className = 'turn-player X';
+
+  initBoard();
+  renderBoard();
+}
+
+// ============================================================
+// BOARD → FLOAT ENCODING
+// (mirrors Board::to_float_array — player perspective)
+// ============================================================
+function boardToFloat(player) {
+  // [3, 4, 4] flattened to [48]
+  const out = new Float32Array(48);
+  // plane2: current player indicator (0=X, 1=O)
+  const plane2val = player === 'X' ? 0.0 : 1.0;
+  for (let x = 0; x < 4; x++) {
+    for (let y = 0; y < 4; y++) {
+      const idx = x * 4 + y;
+      const cell = board[idx]; // 'X', 'O', or null
+      const p0 = 0 * 16 + idx;
+      const p1 = 1 * 16 + idx;
+      const p2 = 2 * 16 + idx;
+      if (cell === player) out[p0] = 1.0;
+      else if (cell !== null) out[p1] = 1.0;
+      out[p2] = plane2val;
+    }
+  }
+  return out;
+}
+
+function getLegalMask() {
+  // [16] — 1 if empty
+  const out = new Float32Array(16);
+  for (let i = 0; i < 16; i++) {
+    out[i] = board[i] === EMPTY ? 1.0 : 0.0;
+  }
+  return out;
+}
+
+// ============================================================
+// TRITON INFERENCE
+// ============================================================
+async function callTriton(boardFloat, maskFloat) {
+  const host = document.getElementById('tritonHost').value.trim();
+  const url = `${host}/v2/models/AlphaZero/infer`;
+
+  // Triton HTTP v2 inference protocol
+  const payload = {
+    inputs: [
+      {
+        name: "boards",
+        shape: [1, 48],
+        datatype: "FP32",
+        data: Array.from(boardFloat)
+      },
+      {
+        name: "mask",
+        shape: [1, 16],
+        datatype: "FP32",
+        data: Array.from(maskFloat)
+      }
+    ],
+    outputs: [
+      { name: "policy" },
+      { name: "value" }
+    ]
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!resp.ok) {
+    const t = await resp.text();
+    throw new Error(`Triton error ${resp.status}: ${t}`);
+  }
+
+  const data = await resp.json();
+
+  // Extract outputs
+  const policyOutput = data.outputs.find(o => o.name === 'policy');
+  const valueOutput = data.outputs.find(o => o.name === 'value');
+
+  const policy = policyOutput.data;   // [16] probabilities
+  const value = valueOutput.data[0];  // scalar
+
+  return { policy, value };
+}
+
+// ============================================================
+// AI REQUEST
+// ============================================================
+async function requestAI() {
+  if (gameOver) return;
+  const btn = document.getElementById('btnAI');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.textContent = '⏳ Thinking...';
+
+  setStatus('loading', 'Querying Triton...');
+
+  try {
+    const boardFloat = boardToFloat(currentPlayer);
+    const maskFloat = getLegalMask();
+    const { policy, value } = await callTriton(boardFloat, maskFloat);
+
+    setStatus('ok', 'Connected');
+    showAIOverlay(policy, value);
+
+    // Find best legal move (highest probability among empty cells)
+    // and auto-place it
+    let bestIdx = -1, bestProb = -1;
+    for (let i = 0; i < 16; i++) {
+      if (board[i] === EMPTY && policy[i] > bestProb) {
+        bestProb = policy[i];
+        bestIdx = i;
+      }
+    }
+
+    // Place AI move after short visual delay so user sees the overlay
+    setTimeout(() => {
+      if (!gameOver && bestIdx >= 0) {
+        placeMove(bestIdx, currentPlayer);
+      }
+    }, 800);
+
+  } catch (err) {
+    setStatus('err', err.message.slice(0, 60));
+    console.error(err);
+  } finally {
+    btn.disabled = gameOver;
+    btn.classList.remove('loading');
+    btn.textContent = '⚡ Ask AI';
+  }
+}
+
+function showAIOverlay(policy, value) {
+  // Color policy heatmap on cells
+  const maxP = Math.max(...policy);
+  for (let i = 0; i < 16; i++) {
+    const cell = document.getElementById(`cell-${i}`);
+    const bg = document.getElementById(`ai-bg-${i}`);
+    const probEl = document.getElementById(`ai-prob-${i}`);
+
+    const p = policy[i];
+    const norm = maxP > 0 ? p / maxP : 0;
+
+    // Color: green tint for high prob
+    const r = Math.round(0 + norm * 0 + (1 - norm) * 26);
+    const g = Math.round(norm * 201 + (1 - norm) * 26);
+    const a_val = Math.round(0 * (1 - norm) + 100 * norm);
+    bg.style.background = `rgba(0, ${Math.round(norm * 201)}, ${Math.round(norm * 100)}, ${0.1 + norm * 0.35})`;
+    
+    if (board[i] === EMPTY) {
+      probEl.textContent = (p * 100).toFixed(1) + '%';
+      cell.classList.add('ai-shown');
+    } else {
+      probEl.textContent = '';
+      cell.classList.remove('ai-shown');
+      bg.style.background = 'transparent';
+    }
+  }
+
+  // Value panel
+  const vPanel = document.getElementById('valuePanel');
+  const vDisplay = document.getElementById('valueDisplay');
+  const vInterp = document.getElementById('valueInterp');
+  const vBar = document.getElementById('valueBar');
+  vPanel.classList.add('visible');
+
+  const vPct = ((value + 1) / 2) * 100; // map [-1,1] → [0,100]
+  vDisplay.textContent = value.toFixed(3);
+
+  if (value > 0.15) {
+    vDisplay.className = 'value-display value-good';
+    vInterp.textContent = 'Favourable position for current player';
+    vBar.style.background = 'var(--accent-o)';
+  } else if (value < -0.15) {
+    vDisplay.className = 'value-display value-bad';
+    vInterp.textContent = 'Unfavourable — be careful!';
+    vBar.style.background = 'var(--accent-x)';
+  } else {
+    vDisplay.className = 'value-display value-neutral';
+    vInterp.textContent = 'Balanced / unclear position';
+    vBar.style.background = 'var(--accent-warn)';
+  }
+  vBar.style.width = `${Math.max(4, Math.min(96, vPct))}%`;
+
+  aiShowing = true;
+}
+
+function clearAIOverlay() {
+  if (!aiShowing) return;
+  for (let i = 0; i < 16; i++) {
+    document.getElementById(`cell-${i}`).classList.remove('ai-shown');
+    document.getElementById(`ai-bg-${i}`).style.background = 'transparent';
+    document.getElementById(`ai-prob-${i}`).textContent = '';
+  }
+  aiShowing = false;
+}
+
+// ============================================================
+// STATUS
+// ============================================================
+function setStatus(state, msg) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  dot.className = `status-dot ${state}`;
+  txt.textContent = msg;
+}
+
+// ============================================================
+// INIT
+// ============================================================
+initBoard();
+renderBoard();
+</script>
+</body>
+</html>

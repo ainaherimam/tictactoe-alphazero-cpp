@@ -218,7 +218,7 @@ private:
      *
      * @return Vector of pairs: (move array {x, y, direction, target}, normalized probability)
      */
-    std::vector<std::pair<Move, float>> get_moves_with_probs(const float* probs) const;
+    std::vector<std::pair<Move, float>> extract_valid_moves_with_value(const float* probs) const;
 
     /**
      * @brief Select a leaf by moving the tree using PUCT Score
@@ -267,7 +267,7 @@ private:
      *
      * @return Game outcome value from the perspective of the node's player
      */
-    float simulate_random_playout(const std::shared_ptr<Node>& node, Board board);
+    float evaluate_position(const std::shared_ptr<Node>& node, Board board);
 
     /**
      * @brief Backpropagates simulation results through the MCTS tree

@@ -16,7 +16,7 @@
 struct Position {
     std::array<float, INPUT_SIZE> board;      ///< board state
     std::array<float, POLICY_SIZE> policy;    ///< policy distribution from mcts
-    std::array<float, POLICY_SIZE> mask;      ///< legal move mask (1.0 = legal, 0.0 = illegal)
+    std::array<float, POLICY_SIZE> mask;      ///< legal move mask (1 legal, 0 illegal)
     float z;                                  ///< Game outcome z
     uint8_t player_index;                     ///< Next player to move from the board state (0 for X, 1 for O)
     

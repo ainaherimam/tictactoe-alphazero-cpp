@@ -5,4 +5,4 @@ export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 cd "${SCRIPT_DIR}"
 
 # Run the training script
-python3 src/training/train.py "$@"
+python3 src/training/train.py --wandb"$@"

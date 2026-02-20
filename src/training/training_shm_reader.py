@@ -157,6 +157,13 @@ class TrainingShmReader:
             'mask': self.views['mask'][indices].copy(),      # [batch_size, 16]
         }
 
+        # i = rng.integers(0, batch_size)
+        # print(f"[sample_batch] Random sample (index {i} of batch):")
+        # print(f"  boards [3x4x4]:\n{batch['boards'][i]}")
+        # print(f"  pi   [16]: {batch['pi'][i]}")
+        # print(f"  z       : {batch['z'][i]:.4f}")
+        # print(f"  mask [16]: {batch['mask'][i]}")
+
         return batch
     
     @property

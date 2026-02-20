@@ -4,5 +4,5 @@ export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 # Change to project root
 cd "${SCRIPT_DIR}"
 
-# Run the Triton server
-python3 src/inference/triton/triton_server.py "$@"
+# Run the inference server
+python3 src/inference/triton/triton_server.py"$@"

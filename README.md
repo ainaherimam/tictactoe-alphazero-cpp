@@ -24,7 +24,7 @@ Tic-Tac-Toe is a classic two-player strategy game played on a traditional 3x3 gr
 
 ## Prerequisites
 * **C++20 Compiler** (GCC 10+, Clang 10+)
-* **CMake 3.15+**
+* **CMake 3.18+**
 * **Python 3.11 or 3.12**
 * **NVIDIA Triton Client** (auto-installed by script)
 
@@ -35,18 +35,54 @@ git clone https://github.com/yourusername/tictactoe-alphazero-cpp.git && cd tict
 
 # install triton, creates venv, builds C++
 ./setup.sh
+```
+## Weights and Biases Loggin
+Create a .env file the this on your main folder, where the folder src is.
 
-# Run inference server
-./run_triton.sh 
-or 
+```sh
+WANDB_API_KEY=YOUR_API_KEY
+```
+
+## Run selfplay and training (run in this order)
+```sh
+# Launch inference first (one terminal)
 ./run_inference_server.sh
 
-# Run selfplay
-./AZ_Triton_TTT
-or 
+# Run training second (new terminal)
+./run_train.sh
+
+# Run selfplay (new terminal)
+./AlphaZero_TTT
+```
+
+## Run selfplay and training with evaluations(run in this order)
+```sh
+# Launch inference first (one terminal)
+./run_inference_server.sh
+
+# Run training second (new terminal)
+./run_train.sh
+
+# Launch best model inference for evaluation (new terminal)
+./run_best_server.sh
+
+# Launch candidate model inference for evaluation (new terminal)
+./run_candidate_server.sh
+
+# Run selfplay (new terminal)
 ./AlphaZero_TTT
 
-# Run training
-./run_train.sh
----
+# Run eval
+./AlphaZero_TTT_Eval
+```
 
+
+## View game data and play against AI
+
+```sh
+# Server that will load the lastest checkpoint
+./run_triton_server.sh
+
+# Launch a web page where you can play the game
+python viewer/game.py
+```

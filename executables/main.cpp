@@ -11,6 +11,61 @@
 #include <vector>
 #include "core/game/constants.h"
 #include <chrono>
+#include <filesystem>
+#include <sstream>
+#include <iomanip>
+
+namespace fs = std::filesystem;
+
+
+// ---------------------------------------------------------------------------
+// Archive all existing folders and trigger files in the checkpoints directory
+// into a timestamped sub-folder, so the directory is clean for this run.
+// ---------------------------------------------------------------------------
+static void archive_checkpoints(const std::string& checkpoints_dir) {
+    if (!fs::exists(checkpoints_dir)) {
+        fs::create_directories(checkpoints_dir);
+        std::cout << "Created checkpoints directory: " << checkpoints_dir << "\n";
+        return;
+    }
+
+    // Collect everything to move (skip existing archive_ folders).
+    std::vector<fs::path> to_move;
+    for (const auto& entry : fs::directory_iterator(checkpoints_dir)) {
+        std::string name = entry.path().filename().string();
+        if (name.rfind("archive_", 0) == 0) continue;
+        to_move.push_back(entry.path());
+    }
+
+    if (to_move.empty()) {
+        std::cout << "Checkpoints directory is clean - nothing to archive.\n";
+        return;
+    }
+
+    // Build timestamped archive folder name: archive_YYYYMMDD_HHMMSS
+    auto now        = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_buf{};
+    localtime_r(&time_t_now, &tm_buf);
+
+    std::ostringstream ts;
+    ts << "archive_" << std::put_time(&tm_buf, "%Y%m%d_%H%M%S");
+    fs::path archive_dir = fs::path(checkpoints_dir) / ts.str();
+    fs::create_directories(archive_dir);
+
+    std::cout << "Archiving " << to_move.size() << " item(s) into " << archive_dir << "\n";
+    for (const auto& src : to_move) {
+        try {
+            fs::rename(src, archive_dir / src.filename());
+            std::cout << "  Moved: " << src.filename() << "\n";
+        } catch (const fs::filesystem_error& e) {
+            std::cerr << "  Warning: could not move " << src.filename()
+                      << " - " << e.what() << "\n";
+        }
+    }
+    std::cout << "Archive complete. Checkpoints directory is ready for this run.\n\n";
+}
+
 
 std::string get_session_dir() {
     struct stat st;
@@ -44,7 +99,7 @@ std::string get_session_dir() {
 void selfplay_worker(int worker_id,
                      std::shared_ptr<TrainingShmWriter>  shm_writer,
                      std::shared_ptr<SharedMemoryInferenceQueue>    queue,
-                     std::shared_ptr<GameLogger>         game_logger,   // ← added
+                     std::shared_ptr<GameLogger>         game_logger,
                      int games_per_worker) {
 
     if (!queue->wait_for_server(30000))
@@ -72,15 +127,25 @@ void selfplay_worker(int worker_id,
 
 int main(int argc, char** argv) {
 
-    const size_t MAX_CAPACITY  = 20000;
+    const size_t MAX_CAPACITY  = 50000;
     const int    NUM_WORKERS   = 4;
-    const int    GAMES_PER_WORKER = 1000;
+    const int    GAMES_PER_WORKER = 2500;
+
+    // Archive any leftover checkpoint folders / trigger files from previous runs.
+    archive_checkpoints("checkpoints/");
 
     std::string session_dir = get_session_dir();
     
     auto shm_writer  = std::make_shared<TrainingShmWriter>(MAX_CAPACITY);
     auto queue      = std::make_shared<SharedMemoryInferenceQueue>("/mcts_jax_inference");
     auto game_logger = std::make_shared<GameLogger>(session_dir);
+
+
+    std::cout << "Waiting for best model server...\n";
+    if (!queue->wait_for_server(30000)) {
+        std::cerr << "Fatal: Best model inference server not ready. Exiting.\n";
+        return 1;
+    }
 
     std::vector<std::thread> workers;
     for (int i = 0; i < NUM_WORKERS; ++i) {
@@ -94,7 +159,7 @@ int main(int argc, char** argv) {
 
     std::cout << "\nAll workers finished!\n";
     std::cout << "  Games pushed:  " << game_logger->total_pushed()  << "\n";
-    std::cout << "  Games written: " << game_logger->total_written() << "\n";   // ← should match
+    std::cout << "  Games written: " << game_logger->total_written() << "\n";
     std::cout << "  Positions:     " << shm_writer->current_size()   << "\n";
 
     std::this_thread::sleep_for(std::chrono::seconds(60));

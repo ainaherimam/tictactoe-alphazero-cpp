@@ -37,6 +37,12 @@ public:
     Cell_state play();
 
     /**
+     * @brief Executes a complete game with data collection and temperature scheduling via the API as inference.
+     * @return The winner of the game (or Empty if draw/timeout)
+     */
+    Cell_state play_via_api();
+
+    /**
      * @brief Gets the move history of the game.
      * @return Const reference to move history string
      */

@@ -91,7 +91,6 @@ std::pair<Move, std::vector<float>> Mcts_agent_triton::choose_move(const Board& 
         logger->log_child_node_stats(child->move, child->acc_value,
                                         child->visit_count, child->prior_proba, child->value_from_nn);
     }
-    // std::cout << "policu from mcts" << best_child->move[0]<<"," << best_child->move[1] <<"\n";
     return {best_child->move, policy_from_mcts};
 }
 
@@ -114,7 +113,7 @@ float Mcts_agent_triton::initiate_and_run_nn(const std::shared_ptr<Node>& node, 
 
     client->infer(input, mask, policy, &value);
     
-    std::vector<std::pair<Move, float>> move_with_logit = get_moves_with_probs(policy);
+    std::vector<std::pair<Move, float>> move_with_logit = extract_valid_moves_with_value(policy);
 
 
     logger->log_nn_evaluation(node->move, value, move_with_logit.size());
@@ -163,7 +162,7 @@ void Mcts_agent_triton::perform_mcts_iterations(int number_iteration, int& mcts_
         auto [chosen_child, new_board] = select_child_for_playout(root, board);
         logger->log_step("SELECTED", chosen_child->move);
 
-        float value_from_nn = simulate_random_playout(chosen_child, new_board);
+        float value_from_nn = evaluate_position(chosen_child, new_board);
 
         logger->log_step("BACKPROPAGATION", chosen_child->move);
         backpropagate(chosen_child, value_from_nn);
@@ -246,7 +245,7 @@ std::pair<std::shared_ptr<Mcts_agent_triton::Node>, std::vector<float>> Mcts_age
     return {children[selected_child_idx], policy};
 }
 
-std::vector<std::pair<Move, float>> Mcts_agent_triton::get_moves_with_probs(
+std::vector<std::pair<Move, float>> Mcts_agent_triton::extract_valid_moves_with_value(
     const float* probs) const {
 
     const int total = X_ * Y_ * DIR_ * TAR_;
@@ -330,7 +329,7 @@ double Mcts_agent_triton::calculate_puct_score(const std::shared_ptr<Node>& chil
                                    (std::sqrt(parent_node->visit_count) / (child_node->visit_count + 1)));
 }
 
-float Mcts_agent_triton::simulate_random_playout(const std::shared_ptr<Node>& node, Board board) {
+float Mcts_agent_triton::evaluate_position(const std::shared_ptr<Node>& node, Board board) {
 
     //The check here are from the actual node point of view.
     Cell_state winner = board.check_winner();

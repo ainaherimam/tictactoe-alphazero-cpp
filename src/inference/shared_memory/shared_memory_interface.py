@@ -215,18 +215,15 @@ class SharedMemoryInterface:
         resp.value = float(value)
         
         # Memory barrier (ensure all writes visible)
-        # In CPython, this is implicit due to GIL, but good practice
+
         ctypes.pythonapi.PyEval_InitThreads()
         
-        # Mark DONE (this releases the C++ thread!)
+        # Mark DONE - this releases the C++ thread!
         req.state.value = JobState.DONE
         
         # Update stats
         self.buffer.total_requests_completed.value += 1
     
-    # ========================================================================
-    # STATISTICS
-    # ========================================================================
     
     def get_stats(self) -> dict:
         """Get buffer statistics"""
@@ -255,9 +252,7 @@ class SharedMemoryInterface:
         current = self.buffer.notification_counter.value
         self.buffer.notification_counter.value = current + 1
     
-    # ========================================================================
-    # DEBUGGING
-    # ========================================================================
+
     
     def print_buffer_state(self):
         """Print current buffer state (for debugging)"""
@@ -283,10 +278,7 @@ class SharedMemoryInterface:
                 print(f"  {state.name:12} : {count:3}")
         print("=" * 60 + "\n")
     
-    # ========================================================================
-    # CLEANUP
-    # ========================================================================
-    
+
     def cleanup(self, unlink: bool = False):
         """
         Cleanup resources
@@ -316,9 +308,6 @@ class SharedMemoryInterface:
         return False
 
 
-# ============================================================================
-# TESTING
-# ============================================================================
 
 if __name__ == "__main__":
     print("\n🧪 Testing shared_memory_interface.py\n")

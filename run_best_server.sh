@@ -5,4 +5,4 @@ export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 cd "${SCRIPT_DIR}"
 
 # Run the inference server
-python3 src/inference/shared_memory/inference_server.py --watch-checkpoints checkpoints"$@"
+python3 src/inference/shared_memory/inference_server.py --shm-name mcts_best_model --watch-checkpoints checkpoints"$@"

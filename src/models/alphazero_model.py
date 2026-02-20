@@ -138,7 +138,7 @@ def alphazero_loss(params, state, batch):
         'policy_loss': policy_loss,
         'value_loss': value_loss,
         'policy_entropy': -jnp.sum(jnp.exp(p_pred) * p_pred, axis=-1).mean(),
-        'value_accuracy': jnp.mean(jnp.abs(v_pred - z_target) < 0.4),
+        'value_accuracy': jnp.mean(jnp.abs(v_pred - z_target) < 0.2),
     }
     
     return total_loss, (metrics, updates['batch_stats'])
@@ -202,6 +202,8 @@ class TrainingConfig:
     # Checkpointing
     checkpoint_dir: str = "checkpoints"
     save_every_n_gens: int = 10        # Save checkpoint every N generations
+    evaluate_every_n_gens: int = 300
+    train_every_n_gens: int = 100
     
     # Logging
     log_every_n_steps: int = 10         # Print metrics every N steps

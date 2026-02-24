@@ -5,4 +5,4 @@ export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
 cd "${SCRIPT_DIR}"
 
 # Run the inference server
-python3 src/inference/triton/triton_server.py"$@"
+python3 src/inference/triton/triton_server.py --"$@"

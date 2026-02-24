@@ -98,7 +98,10 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
                                       bool add_dirichlet_noise = false, float dirichlet_alpha = 0.4,
                                       float exploration_fraction = 0.25) {
 
-
+    if (node->expanded){
+        return node->value_from_nn;
+    }
+    
     Cell_state current_player = node->player;
     Cell_state actual_player = node->player;
     
@@ -114,18 +117,18 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
     uint64_t job_id = queue->submit(input, mask);
     queue->wait(job_id, policy, &value);
     
-    std::vector<std::pair<Move, float>> move_with_logit = extract_valid_moves_with_value(policy);
+    std::vector<std::pair<Move, float>> move_with_value = extract_valid_moves_with_value(policy);
 
 
-    logger->log_nn_evaluation(node->move, value, move_with_logit.size());
+    logger->log_nn_evaluation(node->move, value, move_with_value.size());
     std::vector<float> noise;
     
-    if (add_dirichlet_noise && !move_with_logit.empty()) {
-        noise = generate_dirichlet_noise(move_with_logit.size(), dirichlet_alpha);
+    if (add_dirichlet_noise && !move_with_value.empty()) {
+        noise = generate_dirichlet_noise(move_with_value.size(), dirichlet_alpha);
 
-        for (size_t i = 0; i < move_with_logit.size(); ++i) {
-            move_with_logit[i].second =
-                (1.0 - exploration_fraction) * move_with_logit[i].second + exploration_fraction * noise[i];
+        for (size_t i = 0; i < move_with_value.size(); ++i) {
+            move_with_value[i].second =
+                (1.0 - exploration_fraction) * move_with_value[i].second + exploration_fraction * noise[i];
         }
 
         logger->log_dirichlet_noise_applied(dirichlet_alpha, exploration_fraction);
@@ -133,7 +136,7 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
 
     // For each valid move, initialize a new child node
     int idx = 0;
-    for (const auto& [move, logit] : move_with_logit) {
+    for (const auto& [move, logit] : move_with_value) {
         if (move.tar < 1) {
             actual_player = (current_player == Cell_state::X ? Cell_state::O : Cell_state::X);
         } else {
@@ -237,7 +240,7 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, std::vector<float>> Mcts_a
         policy[legal_indices[i]] = adjusted_visits[i] * inv_sum;
     }
     
-    // Sample from legal moves only ??????????????????
+
     std::random_device rd;
     std::mt19937 gen(rd());
     std::discrete_distribution<> dist(adjusted_visits.begin(), adjusted_visits.end());
@@ -278,7 +281,6 @@ std::vector<std::pair<Move, float>> Mcts_agent_selfplay::extract_valid_moves_wit
     for (auto& m : moves) {
         m.second /= sum;
     }
-
     return moves;
 }
 
@@ -287,7 +289,7 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, Board> Mcts_agent_selfplay
     std::shared_ptr<Node> current = parent_node;
     Cell_state current_player = current->player;
 
-    while (current->expanded && !current->child_nodes.empty()) {
+    while (current->expanded && !current->child_nodes.empty() && depth < max_depth) {
         // Pick best child
         std::shared_ptr<Node> best_child = current->child_nodes[0];
         double max_score = calculate_puct_score(best_child, current);
@@ -318,6 +320,7 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, Board> Mcts_agent_selfplay
         }
 
         current = best_child;
+        depth++;
     }
 
     return {current, board};

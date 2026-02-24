@@ -1,0 +1,2555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MCTS Visualizer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { background: #edf1f6; }
+    #root { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+(function() {
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   DEMO LOG — hardcoded for instant testing
+───────────────────────────────────────────────────────────────────────────── */
+const DEMO_LOG = `MCTS_VIZ | INIT       | SEARCH_START          | move_idx=1 player=X total_iterations=10 exploration_factor=1.4142 temperature=1.0000 dirichlet_alpha=0.3000 dirichlet_epsilon=0.2500
+MCTS_VIZ | INIT       | BOARD_STATE          | board=.XOOXX.OXO.X.OXO
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=0 parent=ROOT child_idx=0 move=(0,0,d1,t-1) prior=0.1621 child_player=O
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=0 parent=ROOT child_idx=1 move=(1,2,d1,t-1) prior=0.2027 child_player=O
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=0 parent=ROOT child_idx=2 move=(2,2,d1,t-1) prior=0.3546 child_player=O
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=0 parent=ROOT child_idx=3 move=(3,0,d1,t-1) prior=0.2806 child_player=O
+MCTS_VIZ | INIT       | ROOT_EXPANDED        | node=ROOT player=X nn_value=0.0872 num_children=4 dirichlet_alpha=0.3000 dirichlet_epsilon=0.2500
+MCTS_VIZ | INIT       | ROOT_CHILD           | child_idx=0 move=(0,0,d1,t-1) prior_after_noise=0.1621
+MCTS_VIZ | INIT       | ROOT_CHILD           | child_idx=1 move=(1,2,d1,t-1) prior_after_noise=0.2027
+MCTS_VIZ | INIT       | ROOT_CHILD           | child_idx=2 move=(2,2,d1,t-1) prior_after_noise=0.3546
+MCTS_VIZ | INIT       | ROOT_CHILD           | child_idx=3 move=(3,0,d1,t-1) prior_after_noise=0.2806
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=1
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=1 depth=0 parent=ROOT move=(0,0,d1,t-1) q=0.0000 u=0.0000 puct=0.0000 prior=0.1621 child_visits=0 parent_visits=0
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=1 depth=0 parent=ROOT move=(1,2,d1,t-1) q=0.0000 u=0.0000 puct=0.0000 prior=0.2027 child_visits=0 parent_visits=0
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=1 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.0000 u=0.0000 puct=0.0000 prior=0.3546 child_visits=0 parent_visits=0
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=1 depth=0 parent=ROOT move=(3,0,d1,t-1) q=0.0000 u=0.0000 puct=0.0000 prior=0.2806 child_visits=0 parent_visits=0
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=1 depth=0 parent=ROOT chosen=(0,0,d1,t-1) winning_puct=0.0000
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=1 depth=0 move=(0,0,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=1 depth=1 move=(0,0,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | TERMINAL_WIN         | iteration=1 move=(0,0,d1,t-1) winner=O value=1.0000
+MCTS_VIZ | BACKPROP   | START                | iteration=1 leaf=(0,0,d1,t-1) raw_value=1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=1 depth_from_leaf=0 move=(0,0,d1,t-1) value_applied=-1.0000 acc_value=-1.0000 visit_count=1 q=-1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=1 depth_from_leaf=1 move=ROOT value_applied=1.0000 acc_value=1.0000 visit_count=1 q=1.0000
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=1 root_acc=1.0000 root_visits=1 root_q=1.0000
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=2
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=2 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.1135 puct=-0.8865 prior=0.1621 child_visits=1 parent_visits=1
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=2 depth=0 parent=ROOT move=(1,2,d1,t-1) q=0.0000 u=0.2838 puct=0.2838 prior=0.2027 child_visits=0 parent_visits=1
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=2 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.0000 u=0.4965 puct=0.4965 prior=0.3546 child_visits=0 parent_visits=1
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=2 depth=0 parent=ROOT move=(3,0,d1,t-1) q=0.0000 u=0.3928 puct=0.3928 prior=0.2806 child_visits=0 parent_visits=1
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=2 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.4965
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=2 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=2 depth=1 move=(2,2,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=2 move=(2,2,d1,t-1) player=O
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=2 parent=(2,2,d1,t-1) child_idx=0 move=(0,0,d1,t-1) prior=0.3110 child_player=X
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=2 parent=(2,2,d1,t-1) child_idx=1 move=(1,2,d1,t-1) prior=0.3189 child_player=X
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=2 parent=(2,2,d1,t-1) child_idx=2 move=(3,0,d1,t-1) prior=0.3701 child_player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=2 move=(2,2,d1,t-1) nn_value=-0.1300 children_created=3
+MCTS_VIZ | BACKPROP   | START                | iteration=2 leaf=(2,2,d1,t-1) raw_value=-0.1300
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=2 depth_from_leaf=0 move=(2,2,d1,t-1) value_applied=0.1300 acc_value=0.1300 visit_count=1 q=0.1300
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=2 depth_from_leaf=1 move=ROOT value_applied=-0.1300 acc_value=0.8700 visit_count=2 q=0.4350
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=2 root_acc=0.8700 root_visits=2 root_q=0.4350
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=3
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=3 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.1605 puct=-0.8395 prior=0.1621 child_visits=1 parent_visits=2
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=3 depth=0 parent=ROOT move=(1,2,d1,t-1) q=0.0000 u=0.4013 puct=0.4013 prior=0.2027 child_visits=0 parent_visits=2
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=3 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.1300 u=0.3511 puct=0.4810 prior=0.3546 child_visits=1 parent_visits=2
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=3 depth=0 parent=ROOT move=(3,0,d1,t-1) q=0.0000 u=0.5555 puct=0.5555 prior=0.2806 child_visits=0 parent_visits=2
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=3 depth=0 parent=ROOT chosen=(3,0,d1,t-1) winning_puct=0.5555
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=3 depth=0 move=(3,0,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=3 depth=1 move=(3,0,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | TERMINAL_WIN         | iteration=3 move=(3,0,d1,t-1) winner=O value=1.0000
+MCTS_VIZ | BACKPROP   | START                | iteration=3 leaf=(3,0,d1,t-1) raw_value=1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=3 depth_from_leaf=0 move=(3,0,d1,t-1) value_applied=-1.0000 acc_value=-1.0000 visit_count=1 q=-1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=3 depth_from_leaf=1 move=ROOT value_applied=1.0000 acc_value=1.8700 visit_count=3 q=0.6233
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=3 root_acc=1.8700 root_visits=3 root_q=0.6233
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=4
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.1966 puct=-0.8034 prior=0.1621 child_visits=1 parent_visits=3
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=0 parent=ROOT move=(1,2,d1,t-1) q=0.0000 u=0.4915 puct=0.4915 prior=0.2027 child_visits=0 parent_visits=3
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.1300 u=0.4300 puct=0.5599 prior=0.3546 child_visits=1 parent_visits=3
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.3402 puct=-0.6598 prior=0.2806 child_visits=1 parent_visits=3
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=4 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.5599
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=4 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=0.0000 u=0.4354 puct=0.4354 prior=0.3110 child_visits=0 parent_visits=1
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=0.0000 u=0.4465 puct=0.4465 prior=0.3189 child_visits=0 parent_visits=1
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=4 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=0.0000 u=0.5181 puct=0.5181 prior=0.3701 child_visits=0 parent_visits=1
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=4 depth=1 parent=(2,2,d1,t-1) chosen=(3,0,d1,t-1) winning_puct=0.5181
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=4 depth=1 move=(3,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=4 depth=2 move=(3,0,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=4 move=(3,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=4 parent=(3,0,d1,t-1) child_idx=0 move=(0,0,d1,t-1) prior=0.4652 child_player=O
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=4 parent=(3,0,d1,t-1) child_idx=1 move=(1,2,d1,t-1) prior=0.5348 child_player=O
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=4 move=(3,0,d1,t-1) nn_value=0.2124 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=4 leaf=(3,0,d1,t-1) raw_value=0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=4 depth_from_leaf=0 move=(3,0,d1,t-1) value_applied=-0.2124 acc_value=-0.2124 visit_count=1 q=-0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=4 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.2124 acc_value=0.3424 visit_count=2 q=0.1712
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=4 depth_from_leaf=2 move=ROOT value_applied=-0.2124 acc_value=1.6576 visit_count=4 q=0.4144
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=4 root_acc=1.6576 root_visits=4 root_q=0.4144
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=5
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=5 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.2270 puct=-0.7730 prior=0.1621 child_visits=1 parent_visits=4
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=5 depth=0 parent=ROOT move=(1,2,d1,t-1) q=0.0000 u=0.5675 puct=0.5675 prior=0.2027 child_visits=0 parent_visits=4
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=5 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.1712 u=0.3310 puct=0.5022 prior=0.3546 child_visits=2 parent_visits=4
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=5 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.3928 puct=-0.6072 prior=0.2806 child_visits=1 parent_visits=4
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=5 depth=0 parent=ROOT chosen=(1,2,d1,t-1) winning_puct=0.5675
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=5 depth=0 move=(1,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=5 depth=1 move=(1,2,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | TERMINAL_WIN         | iteration=5 move=(1,2,d1,t-1) winner=O value=1.0000
+MCTS_VIZ | BACKPROP   | START                | iteration=5 leaf=(1,2,d1,t-1) raw_value=1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=5 depth_from_leaf=0 move=(1,2,d1,t-1) value_applied=-1.0000 acc_value=-1.0000 visit_count=1 q=-1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=5 depth_from_leaf=1 move=ROOT value_applied=1.0000 acc_value=2.6576 visit_count=5 q=0.5315
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=5 root_acc=2.6576 root_visits=5 root_q=0.5315
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=6
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.2538 puct=-0.7462 prior=0.1621 child_visits=1 parent_visits=5
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.3173 puct=-0.6827 prior=0.2027 child_visits=1 parent_visits=5
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.1712 u=0.3701 puct=0.5413 prior=0.3546 child_visits=2 parent_visits=5
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.4391 puct=-0.5609 prior=0.2806 child_visits=1 parent_visits=5
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=6 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.5413
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=6 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=0.0000 u=0.6158 puct=0.6158 prior=0.3110 child_visits=0 parent_visits=2
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=0.0000 u=0.6314 puct=0.6314 prior=0.3189 child_visits=0 parent_visits=2
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=6 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.3663 puct=0.1539 prior=0.3701 child_visits=1 parent_visits=2
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=6 depth=1 parent=(2,2,d1,t-1) chosen=(1,2,d1,t-1) winning_puct=0.6314
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=6 depth=1 move=(1,2,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=6 depth=2 move=(1,2,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | TERMINAL_WIN         | iteration=6 move=(1,2,d1,t-1) winner=X value=1.0000
+MCTS_VIZ | BACKPROP   | START                | iteration=6 leaf=(1,2,d1,t-1) raw_value=1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=6 depth_from_leaf=0 move=(1,2,d1,t-1) value_applied=-1.0000 acc_value=-1.0000 visit_count=1 q=-1.0000
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=6 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=1.0000 acc_value=1.3424 visit_count=3 q=0.4475
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=6 depth_from_leaf=2 move=ROOT value_applied=-1.0000 acc_value=1.6576 visit_count=6 q=0.2763
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=6 root_acc=1.6576 root_visits=6 root_q=0.2763
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=7
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.2780 puct=-0.7220 prior=0.1621 child_visits=1 parent_visits=6
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.3475 puct=-0.6525 prior=0.2027 child_visits=1 parent_visits=6
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.4475 u=0.3040 puct=0.7515 prior=0.3546 child_visits=3 parent_visits=6
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.4811 puct=-0.5189 prior=0.2806 child_visits=1 parent_visits=6
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=7 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.7515
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=7 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=0.0000 u=0.7542 puct=0.7542 prior=0.3110 child_visits=0 parent_visits=3
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.3867 puct=-0.6133 prior=0.3189 child_visits=1 parent_visits=3
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=7 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.4487 puct=0.2362 prior=0.3701 child_visits=1 parent_visits=3
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=7 depth=1 parent=(2,2,d1,t-1) chosen=(0,0,d1,t-1) winning_puct=0.7542
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=7 depth=1 move=(0,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=7 depth=2 move=(0,0,d1,t-1) already_expanded=false visit_count=0
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=7 move=(0,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=7 parent=(0,0,d1,t-1) child_idx=0 move=(1,2,d1,t-1) prior=0.4912 child_player=O
+MCTS_VIZ | EVALUATION | EXPANSION_CHILD      | iteration=7 parent=(0,0,d1,t-1) child_idx=1 move=(3,0,d1,t-1) prior=0.5088 child_player=O
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=7 move=(0,0,d1,t-1) nn_value=0.1834 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=7 leaf=(0,0,d1,t-1) raw_value=0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=7 depth_from_leaf=0 move=(0,0,d1,t-1) value_applied=-0.1834 acc_value=-0.1834 visit_count=1 q=-0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=7 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.1834 acc_value=1.5258 visit_count=4 q=0.3814
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=7 depth_from_leaf=2 move=ROOT value_applied=-0.1834 acc_value=1.4742 visit_count=7 q=0.2106
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=7 root_acc=1.4742 root_visits=7 root_q=0.2106
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=8
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.3003 puct=-0.6997 prior=0.1621 child_visits=1 parent_visits=7
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.3754 puct=-0.6246 prior=0.2027 child_visits=1 parent_visits=7
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.3814 u=0.2627 puct=0.6442 prior=0.3546 child_visits=4 parent_visits=7
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.5196 puct=-0.4804 prior=0.2806 child_visits=1 parent_visits=7
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=8 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.6442
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=8 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.4354 puct=0.2521 prior=0.3110 child_visits=1 parent_visits=4
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.4465 puct=-0.5535 prior=0.3189 child_visits=1 parent_visits=4
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=8 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.5181 puct=0.3056 prior=0.3701 child_visits=1 parent_visits=4
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=8 depth=1 parent=(2,2,d1,t-1) chosen=(3,0,d1,t-1) winning_puct=0.3056
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=8 depth=1 move=(3,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=8 depth=2 move=(3,0,d1,t-1) already_expanded=true visit_count=1
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=8 move=(3,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=8 move=(3,0,d1,t-1) nn_value=0.2124 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=8 leaf=(3,0,d1,t-1) raw_value=0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=8 depth_from_leaf=0 move=(3,0,d1,t-1) value_applied=-0.2124 acc_value=-0.4249 visit_count=2 q=-0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=8 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.2124 acc_value=1.7382 visit_count=5 q=0.3476
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=8 depth_from_leaf=2 move=ROOT value_applied=-0.2124 acc_value=1.2618 visit_count=8 q=0.1577
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=8 root_acc=1.2618 root_visits=8 root_q=0.1577
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=9
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.3210 puct=-0.6790 prior=0.1621 child_visits=1 parent_visits=8
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.4013 puct=-0.5987 prior=0.2027 child_visits=1 parent_visits=8
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.3476 u=0.2340 puct=0.5817 prior=0.3546 child_visits=5 parent_visits=8
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.5555 puct=-0.4445 prior=0.2806 child_visits=1 parent_visits=8
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=9 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.5817
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=9 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.4868 puct=0.3035 prior=0.3110 child_visits=1 parent_visits=5
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.4992 puct=-0.5008 prior=0.3189 child_visits=1 parent_visits=5
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=9 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.3861 puct=0.1737 prior=0.3701 child_visits=2 parent_visits=5
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=9 depth=1 parent=(2,2,d1,t-1) chosen=(0,0,d1,t-1) winning_puct=0.3035
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=9 depth=1 move=(0,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=9 depth=2 move=(0,0,d1,t-1) already_expanded=true visit_count=1
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=9 move=(0,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=9 move=(0,0,d1,t-1) nn_value=0.1834 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=9 leaf=(0,0,d1,t-1) raw_value=0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=9 depth_from_leaf=0 move=(0,0,d1,t-1) value_applied=-0.1834 acc_value=-0.3667 visit_count=2 q=-0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=9 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.1834 acc_value=1.9216 visit_count=6 q=0.3203
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=9 depth_from_leaf=2 move=ROOT value_applied=-0.1834 acc_value=1.0784 visit_count=9 q=0.1198
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=9 root_acc=1.0784 root_visits=9 root_q=0.1198
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=10
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.3405 puct=-0.6595 prior=0.1621 child_visits=1 parent_visits=9
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.4256 puct=-0.5744 prior=0.2027 child_visits=1 parent_visits=9
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.3203 u=0.2128 puct=0.5330 prior=0.3546 child_visits=6 parent_visits=9
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.5892 puct=-0.4108 prior=0.2806 child_visits=1 parent_visits=9
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=10 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.5330
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=10 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.3555 puct=0.1722 prior=0.3110 child_visits=2 parent_visits=6
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.5468 puct=-0.4532 prior=0.3189 child_visits=1 parent_visits=6
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=10 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.4230 puct=0.2106 prior=0.3701 child_visits=2 parent_visits=6
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=10 depth=1 parent=(2,2,d1,t-1) chosen=(3,0,d1,t-1) winning_puct=0.2106
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=10 depth=1 move=(3,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=10 depth=2 move=(3,0,d1,t-1) already_expanded=true visit_count=2
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=10 move=(3,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=10 move=(3,0,d1,t-1) nn_value=0.2124 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=10 leaf=(3,0,d1,t-1) raw_value=0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=10 depth_from_leaf=0 move=(3,0,d1,t-1) value_applied=-0.2124 acc_value=-0.6373 visit_count=3 q=-0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=10 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.2124 acc_value=2.1340 visit_count=7 q=0.3049
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=10 depth_from_leaf=2 move=ROOT value_applied=-0.2124 acc_value=0.8660 visit_count=10 q=0.0866
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=10 root_acc=0.8660 root_visits=10 root_q=0.0866
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=11
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.3589 puct=-0.6411 prior=0.1621 child_visits=1 parent_visits=10
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.4487 puct=-0.5513 prior=0.2027 child_visits=1 parent_visits=10
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.3049 u=0.1963 puct=0.5011 prior=0.3546 child_visits=7 parent_visits=10
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.6210 puct=-0.3790 prior=0.2806 child_visits=1 parent_visits=10
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=11 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.5011
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=11 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.3840 puct=0.2006 prior=0.3110 child_visits=2 parent_visits=7
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.5907 puct=-0.4093 prior=0.3189 child_visits=1 parent_visits=7
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=11 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.3427 puct=0.1302 prior=0.3701 child_visits=3 parent_visits=7
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=11 depth=1 parent=(2,2,d1,t-1) chosen=(0,0,d1,t-1) winning_puct=0.2006
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=11 depth=1 move=(0,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=11 depth=2 move=(0,0,d1,t-1) already_expanded=true visit_count=2
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=11 move=(0,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=11 move=(0,0,d1,t-1) nn_value=0.1834 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=11 leaf=(0,0,d1,t-1) raw_value=0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=11 depth_from_leaf=0 move=(0,0,d1,t-1) value_applied=-0.1834 acc_value=-0.5501 visit_count=3 q=-0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=11 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.1834 acc_value=2.3174 visit_count=8 q=0.2897
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=11 depth_from_leaf=2 move=ROOT value_applied=-0.1834 acc_value=0.6826 visit_count=11 q=0.0621
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=11 root_acc=0.6826 root_visits=11 root_q=0.0621
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=12
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.3764 puct=-0.6236 prior=0.1621 child_visits=1 parent_visits=11
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.4706 puct=-0.5294 prior=0.2027 child_visits=1 parent_visits=11
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.2897 u=0.1830 puct=0.4726 prior=0.3546 child_visits=8 parent_visits=11
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.6514 puct=-0.3486 prior=0.2806 child_visits=1 parent_visits=11
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=12 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.4726
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=12 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.3079 puct=0.1245 prior=0.3110 child_visits=3 parent_visits=8
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.6314 puct=-0.3686 prior=0.3189 child_visits=1 parent_visits=8
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=12 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.3663 puct=0.1539 prior=0.3701 child_visits=3 parent_visits=8
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=12 depth=1 parent=(2,2,d1,t-1) chosen=(3,0,d1,t-1) winning_puct=0.1539
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=12 depth=1 move=(3,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=12 depth=2 move=(3,0,d1,t-1) already_expanded=true visit_count=3
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=12 move=(3,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=12 move=(3,0,d1,t-1) nn_value=0.2124 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=12 leaf=(3,0,d1,t-1) raw_value=0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=12 depth_from_leaf=0 move=(3,0,d1,t-1) value_applied=-0.2124 acc_value=-0.8498 visit_count=4 q=-0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=12 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.2124 acc_value=2.5299 visit_count=9 q=0.2811
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=12 depth_from_leaf=2 move=ROOT value_applied=-0.2124 acc_value=0.4701 visit_count=12 q=0.0392
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=12 root_acc=0.4701 root_visits=12 root_q=0.0392
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=13
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.3931 puct=-0.6069 prior=0.1621 child_visits=1 parent_visits=12
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.4915 puct=-0.5085 prior=0.2027 child_visits=1 parent_visits=12
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.2811 u=0.1720 puct=0.4531 prior=0.3546 child_visits=9 parent_visits=12
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.6803 puct=-0.3197 prior=0.2806 child_visits=1 parent_visits=12
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=13 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.4531
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=13 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.3266 puct=0.1432 prior=0.3110 child_visits=3 parent_visits=9
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.6697 puct=-0.3303 prior=0.3189 child_visits=1 parent_visits=9
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=13 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.3108 puct=0.0984 prior=0.3701 child_visits=4 parent_visits=9
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=13 depth=1 parent=(2,2,d1,t-1) chosen=(0,0,d1,t-1) winning_puct=0.1432
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=13 depth=1 move=(0,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=13 depth=2 move=(0,0,d1,t-1) already_expanded=true visit_count=3
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=13 move=(0,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=13 move=(0,0,d1,t-1) nn_value=0.1834 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=13 leaf=(0,0,d1,t-1) raw_value=0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=13 depth_from_leaf=0 move=(0,0,d1,t-1) value_applied=-0.1834 acc_value=-0.7335 visit_count=4 q=-0.1834
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=13 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.1834 acc_value=2.7132 visit_count=10 q=0.2713
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=13 depth_from_leaf=2 move=ROOT value_applied=-0.1834 acc_value=0.2868 visit_count=13 q=0.0221
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=13 root_acc=0.2868 root_visits=13 root_q=0.0221
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=14
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=0 parent=ROOT move=(0,0,d1,t-1) q=-1.0000 u=0.4092 puct=-0.5908 prior=0.1621 child_visits=1 parent_visits=13
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=0 parent=ROOT move=(1,2,d1,t-1) q=-1.0000 u=0.5116 puct=-0.4884 prior=0.2027 child_visits=1 parent_visits=13
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=0 parent=ROOT move=(2,2,d1,t-1) q=0.2713 u=0.1627 puct=0.4341 prior=0.3546 child_visits=10 parent_visits=13
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=0 parent=ROOT move=(3,0,d1,t-1) q=-1.0000 u=0.7081 puct=-0.2919 prior=0.2806 child_visits=1 parent_visits=13
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=14 depth=0 parent=ROOT chosen=(2,2,d1,t-1) winning_puct=0.4341
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=14 depth=0 move=(2,2,d1,t-1) player_after=O
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=1 parent=(2,2,d1,t-1) move=(0,0,d1,t-1) q=-0.1834 u=0.2754 puct=0.0920 prior=0.3110 child_visits=4 parent_visits=10
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=1 parent=(2,2,d1,t-1) move=(1,2,d1,t-1) q=-1.0000 u=0.7060 puct=-0.2940 prior=0.3189 child_visits=1 parent_visits=10
+MCTS_VIZ | SELECTION  | PUCT_CANDIDATE       | iteration=14 depth=1 parent=(2,2,d1,t-1) move=(3,0,d1,t-1) q=-0.2124 u=0.3277 puct=0.1152 prior=0.3701 child_visits=4 parent_visits=10
+MCTS_VIZ | SELECTION  | LEVEL_DECISION       | iteration=14 depth=1 parent=(2,2,d1,t-1) chosen=(3,0,d1,t-1) winning_puct=0.1152
+MCTS_VIZ | SELECTION  | MOVE_APPLIED         | iteration=14 depth=1 move=(3,0,d1,t-1) player_after=X
+MCTS_VIZ | SELECTION  | LEAF_REACHED         | iteration=14 depth=2 move=(3,0,d1,t-1) already_expanded=true visit_count=4
+MCTS_VIZ | EVALUATION | NN_QUERY             | iteration=14 move=(3,0,d1,t-1) player=X
+MCTS_VIZ | EVALUATION | NN_RESULT            | iteration=14 move=(3,0,d1,t-1) nn_value=0.2124 children_created=2
+MCTS_VIZ | BACKPROP   | START                | iteration=14 leaf=(3,0,d1,t-1) raw_value=0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=14 depth_from_leaf=0 move=(3,0,d1,t-1) value_applied=-0.2124 acc_value=-1.0622 visit_count=5 q=-0.2124
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=14 depth_from_leaf=1 move=(2,2,d1,t-1) value_applied=0.2124 acc_value=2.9257 visit_count=11 q=0.2660
+MCTS_VIZ | BACKPROP   | STEP                 | iteration=14 depth_from_leaf=2 move=ROOT value_applied=-0.2124 acc_value=0.0743 visit_count=14 q=0.0053
+MCTS_VIZ | BACKPROP   | DONE                 | iteration=14 root_acc=0.0743 root_visits=14 root_q=0.0053
+MCTS_VIZ | SELECTION  | ITERATION_START      | iteration=15
+MCTS_VIZ | FINAL      | ROOT_CHILD_STAT      | move_idx=1 rank=0 move=(2,2,d1,t-1) visit_count=94 q=0.2305 prior=0.3546 policy_prob=0.9400
+MCTS_VIZ | FINAL      | ROOT_CHILD_STAT      | move_idx=1 rank=1 move=(3,0,d1,t-1) visit_count=3 q=-1.0000 prior=0.2806 policy_prob=0.0300
+MCTS_VIZ | FINAL      | ROOT_CHILD_STAT      | move_idx=1 rank=2 move=(1,2,d1,t-1) visit_count=2 q=-1.0000 prior=0.2027 policy_prob=0.0200
+MCTS_VIZ | FINAL      | ROOT_CHILD_STAT      | move_idx=1 rank=3 move=(0,0,d1,t-1) visit_count=1 q=-1.0000 prior=0.1621 policy_prob=0.0100
+MCTS_VIZ | FINAL      | DECISION             | move_idx=1 move=(2,2,d1,t-1) visit_count=94 q=0.2305 temperature=0.1000 selection_mode=sampled
+MCTS_VIZ | FINAL      | SEARCH_END           | move_idx=1 total_iterations_run=100`;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LOG PARSER
+───────────────────────────────────────────────────────────────────────────── */
+function parseMove(s) {
+  if (!s || s === "ROOT") return null;
+  const m = s.match(/\((\d+),(\d+)/);
+  if (!m) return null;
+  return { row: parseInt(m[1]), col: parseInt(m[2]) };
+}
+
+function parsePayload(s) {
+  const obj = {};
+  const re = /(\w+)=([^\s]+)/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    obj[m[1]] = m[2];
+  }
+  return obj;
+}
+
+function coordsToKey(moveStr) {
+  if (!moveStr || moveStr === "ROOT") return "ROOT";
+  const m = moveStr.match(/\((\d+),(\d+)/);
+  if (!m) return moveStr;
+  return `${m[1]}_${m[2]}`;
+}
+
+function parseLog(text) {
+  const lines = text.split("\n");
+  const actions = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("─")) continue;
+    const parts = trimmed.split(" | ");
+    if (parts.length < 4 || parts[0].trim() !== "MCTS_VIZ") continue;
+    const phase = parts[1].trim();
+    const action = parts[2].trim();
+    const payload = parsePayload(parts[3]);
+    actions.push({ phase, action, payload, raw: trimmed });
+  }
+  return actions;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STATE COMPUTER  — precompute snapshots at every action index
+   Node IDs are path-based: "ROOT", "ROOT__0_1", "ROOT__0_1__1_2", etc.
+   This handles the same (row,col) appearing at different tree depths.
+───────────────────────────────────────────────────────────────────────────── */
+function computeSnapshots(actions) {
+  const snapshots = [];
+
+  // Working state — mutated in-place, copied into each snapshot
+  const board = Array(4).fill(null).map(() => Array(4).fill("empty"));
+  const nodes = {}; // nodeId → node
+  const edges = []; // {from, to, prior}
+
+  // Every node gets a globally unique ID. We look up existing children of a
+  // parent by (parentId, coordKey) so selection traversal can find them, but
+  // EXPANSION always creates brand-new nodes — no sharing.
+  let nodeCounter = 0;
+  // parentId::coordKey → nodeId   (one slot per coord per parent)
+  const childLookup = {};
+
+  function findChild(parentId, moveStr) {
+    if (!moveStr || moveStr === "ROOT") return "ROOT";
+    const coordKey = coordsToKey(moveStr);
+    return childLookup[parentId + "::" + coordKey] ?? null;
+  }
+
+  function registerChild(parentId, moveStr, nodeId) {
+    const coordKey = coordsToKey(moveStr);
+    childLookup[parentId + "::" + coordKey] = nodeId;
+  }
+
+  function newNodeId(moveStr) {
+    const coordKey = coordsToKey(moveStr);
+    return "N" + (nodeCounter++) + "_" + coordKey;
+  }
+
+  let currentPlayer = "X";
+  let currentIter = 0;
+  let activeNodeId = "ROOT";
+  let activePath = [];
+  let backpropPath = [];
+  const puctScores = {}; // nodeId → scores
+  let config = {};
+  let leafNNValue = null;
+  let backpropValue = null;
+  let decisionMove = null;
+  let finalStats = {};
+
+  // Helpers
+  const boardCopy = () => board.map((r) => [...r]);
+  const nodesCopy = () => {
+    const c = {};
+    for (const k in nodes) c[k] = { ...nodes[k], children: [...nodes[k].children] };
+    return c;
+  };
+  const edgesCopy = () => edges.map((e) => ({ ...e }));
+  const puctCopy = () => {
+    const c = {};
+    for (const k in puctScores) c[k] = { ...puctScores[k] };
+    return c;
+  };
+
+  // Track current selection path as stack of nodeIds for active node resolution
+  let selectionStack = ["ROOT"]; // stack of nodeIds representing current traversal path
+
+  // Root node
+  nodes["ROOT"] = {
+    id: "ROOT",
+    move: null,
+    player: "X",
+    visits: 0,
+    accValue: 0,
+    q: 0,
+    prior: 0,
+    nnValue: null,
+    children: [],
+    parent: null,
+    state: "root",
+    boardSnapshot: Array(4).fill(null).map(() => Array(4).fill("empty")),
+    terminalOutcome: null,
+    label: "ROOT",
+  };
+
+  for (let i = 0; i < actions.length; i++) {
+    const { phase, action, payload } = actions[i];
+
+    // Reset transient visual states before applying new action
+    for (const k in nodes) {
+      const s = nodes[k].state;
+      if (s === "active" || s === "selected" || s === "puct-candidate" ||
+          s === "leaf" || s === "nn-query" || s === "nn-result" || s === "new") {
+        nodes[k].state = "normal";
+      }
+    }
+    nodes["ROOT"].state = "root";
+    for (const id of backpropPath) {
+      if (nodes[id]) nodes[id].state = "backprop";
+    }
+
+    // ── INIT ──────────────────────────────────────────────────────────────────
+    if (phase === "INIT") {
+      if (action === "SEARCH_START") {
+        config = {
+          player: payload.player,
+          totalIter: parseInt(payload.total_iterations),
+          explorationFactor: parseFloat(payload.exploration_factor),
+          temperature: parseFloat(payload.temperature),
+          dirichletAlpha: parseFloat(payload.dirichlet_alpha),
+          dirichletEpsilon: parseFloat(payload.dirichlet_epsilon),
+        };
+        currentPlayer = payload.player;
+        for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) board[r][c] = "empty";
+        nodes["ROOT"].player = payload.player;
+        nodes["ROOT"].state = "root";
+        nodes["ROOT"].boardSnapshot = boardCopy();
+        backpropPath = [];
+        activePath = [];
+        selectionStack = ["ROOT"];
+        activeNodeId = "ROOT";
+        decisionMove = null;
+        finalStats = {};
+        for (const k in puctScores) delete puctScores[k];
+
+      } else if (action === "ROOT_EXPANDED") {
+        nodes["ROOT"].nnValue = parseFloat(payload.nn_value);
+        leafNNValue = parseFloat(payload.nn_value);
+
+      } else if (action === "BOARD_STATE") {
+        // Parse 16-char flat board string: 'X'=X, 'O'=O, '.'=empty
+        // Row-major: index = r*4 + c
+        const boardStr = payload.board ?? "";
+        if (boardStr.length === 16) {
+          for (let r = 0; r < 4; r++) {
+            for (let c = 0; c < 4; c++) {
+              const ch = boardStr[r * 4 + c];
+              board[r][c] = ch === "X" ? "X" : ch === "O" ? "O" : "empty";
+            }
+          }
+          // Update root node's board snapshot with the real game state
+          nodes["ROOT"].boardSnapshot = boardCopy();
+        }
+
+      } else if (action === "ROOT_CHILD") {
+        // Root children are fixed at init — reuse if already registered
+        let nodeId = findChild("ROOT", payload.move);
+        const mv = parseMove(payload.move);
+        if (!nodeId) {
+          nodeId = newNodeId(payload.move);
+          const childBoard = boardCopy();
+          if (mv) childBoard[mv.row][mv.col] = currentPlayer;
+          nodes[nodeId] = {
+            id: nodeId,
+            move: mv,
+            player: currentPlayer === "X" ? "O" : "X",
+            visits: 0, accValue: 0, q: 0,
+            prior: parseFloat(payload.prior_after_noise),
+            nnValue: null,
+            children: [],
+            parent: "ROOT",
+            state: "new",
+            boardSnapshot: childBoard,
+            terminalOutcome: null,
+            label: mv ? `(${mv.row},${mv.col})` : "?",
+          };
+          nodes["ROOT"].children.push(nodeId);
+          edges.push({ from: "ROOT", to: nodeId, prior: parseFloat(payload.prior_after_noise) });
+          registerChild("ROOT", payload.move, nodeId);
+        }
+      }
+    }
+
+    // ── SELECTION ─────────────────────────────────────────────────────────────
+    if (phase === "SELECTION") {
+      if (action === "ITERATION_START") {
+        currentIter = parseInt(payload.iteration);
+        backpropPath = [];
+        for (const id of Object.keys(puctScores)) delete puctScores[id];
+        nodes["ROOT"].state = "root";
+        leafNNValue = null;
+        backpropValue = null;
+        activePath = ["ROOT"];
+        selectionStack = ["ROOT"];
+        activeNodeId = "ROOT";
+        // Reset board to root state
+        const rb = nodes["ROOT"].boardSnapshot;
+        if (rb) for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) board[r][c] = rb[r][c];
+        currentPlayer = nodes["ROOT"].player;
+
+      } else if (action === "PUCT_CANDIDATE") {
+        const parentId = selectionStack[selectionStack.length - 1];
+        const childId = findChild(parentId, payload.move);
+        if (childId) {
+          puctScores[childId] = {
+            q: parseFloat(payload.q),
+            u: parseFloat(payload.u),
+            puct: parseFloat(payload.puct),
+            prior: parseFloat(payload.prior),
+            childVisits: parseInt(payload.child_visits),
+            parentVisits: parseInt(payload.parent_visits),
+            isWinner: false,
+          };
+          if (nodes[childId]) nodes[childId].state = "puct-candidate";
+        }
+
+      } else if (action === "LEVEL_DECISION") {
+        const parentId = selectionStack[selectionStack.length - 1];
+        const chosenId = findChild(parentId, payload.chosen);
+        if (chosenId) {
+          for (const k in puctScores) puctScores[k].isWinner = (k === chosenId);
+          if (nodes[chosenId]) nodes[chosenId].state = "selected";
+          activeNodeId = chosenId;
+        }
+
+      } else if (action === "MOVE_APPLIED") {
+        const mv = parseMove(payload.move);
+        if (mv) {
+          board[mv.row][mv.col] = currentPlayer;
+          currentPlayer = payload.player_after;
+        }
+        const parentId = selectionStack[selectionStack.length - 1];
+        const nodeId = findChild(parentId, payload.move) ?? "ROOT";
+        selectionStack.push(nodeId);
+        activePath = [...selectionStack];
+        activeNodeId = nodeId;
+        if (nodes[nodeId]) {
+          nodes[nodeId].state = "active";
+          nodes[nodeId].boardSnapshot = boardCopy();
+        }
+
+      } else if (action === "LEAF_REACHED") {
+        // The leaf is the node already on top of selectionStack (pushed by MOVE_APPLIED)
+        const nodeId = selectionStack[selectionStack.length - 1];
+        activeNodeId = nodeId;
+        if (nodes[nodeId]) nodes[nodeId].state = "leaf";
+      }
+    }
+
+    // ── EVALUATION ────────────────────────────────────────────────────────────
+    if (phase === "EVALUATION") {
+      const curParent = selectionStack[selectionStack.length - 1];
+      const leafId = selectionStack[selectionStack.length - 1]; // current node IS the leaf
+
+      if (action === "NN_QUERY") {
+        activeNodeId = leafId;
+        if (nodes[leafId]) nodes[leafId].state = "nn-query";
+
+      } else if (action === "NN_RESULT") {
+        leafNNValue = parseFloat(payload.nn_value);
+        if (nodes[leafId]) {
+          nodes[leafId].nnValue = leafNNValue;
+          nodes[leafId].state = "nn-result";
+        }
+
+      } else if (action === "EXPANSION_CHILD") {
+        // Always create a brand-new unique child — no sharing between parents
+        const mv = parseMove(payload.move);
+        const childId = newNodeId(payload.move);
+        const childBoard = boardCopy();
+        if (mv) childBoard[mv.row][mv.col] = currentPlayer;
+        nodes[childId] = {
+          id: childId,
+          move: mv,
+          player: payload.child_player,
+          visits: 0, accValue: 0, q: 0,
+          prior: parseFloat(payload.prior),
+          nnValue: null,
+          children: [],
+          parent: leafId,
+          state: "new",
+          boardSnapshot: childBoard,
+          terminalOutcome: null,
+          label: mv ? `(${mv.row},${mv.col})` : "?",
+        };
+        if (nodes[leafId]) nodes[leafId].children.push(childId);
+        edges.push({ from: leafId, to: childId, prior: parseFloat(payload.prior) });
+        registerChild(leafId, payload.move, childId);
+
+      } else if (action === "TERMINAL_WIN") {
+        leafNNValue = parseFloat(payload.value);
+        if (nodes[leafId]) {
+          nodes[leafId].state = "terminal-win";
+          nodes[leafId].terminalOutcome = { type: "win", winner: payload.winner, value: leafNNValue };
+        }
+        activeNodeId = leafId;
+
+      } else if (action === "TERMINAL_LOSS") {
+        leafNNValue = parseFloat(payload.value);
+        if (nodes[leafId]) {
+          nodes[leafId].state = "terminal-loss";
+          nodes[leafId].terminalOutcome = { type: "loss", loser: payload.loser, value: leafNNValue };
+        }
+        activeNodeId = leafId;
+      }
+    }
+
+    // ── BACKPROP ───────────────────────────────────────────────────────────────
+    if (phase === "BACKPROP") {
+      if (action === "START") {
+        backpropPath = [];
+        backpropValue = parseFloat(payload.raw_value);
+
+      } else if (action === "STEP") {
+        backpropValue = parseFloat(payload.value_applied);
+        // Resolve node from backprop path — walk from leaf upward
+        // depth_from_leaf=0 → leaf (last in selectionStack), 1 → parent, etc.
+        const depth = parseInt(payload.depth_from_leaf);
+        const stackIdx = selectionStack.length - 1 - depth;
+        const id = stackIdx >= 0 ? selectionStack[stackIdx] : "ROOT";
+        if (nodes[id]) {
+          nodes[id].visits = parseInt(payload.visit_count);
+          nodes[id].accValue = parseFloat(payload.acc_value);
+          nodes[id].q = parseFloat(payload.q);
+          nodes[id].state = "backprop";
+        }
+        if (!backpropPath.includes(id)) backpropPath.push(id);
+        activeNodeId = id;
+        // Skip ROOT update step — only show edge from root's child upward
+        if (payload.move === "ROOT") continue;
+
+      } else if (action === "DONE") {
+        nodes["ROOT"].visits = parseInt(payload.root_visits);
+        nodes["ROOT"].accValue = parseFloat(payload.root_acc);
+        nodes["ROOT"].q = parseFloat(payload.root_q);
+        nodes["ROOT"].state = "root";
+        backpropPath = [];
+        backpropValue = null;
+      }
+    }
+
+    // ── FINAL ──────────────────────────────────────────────────────────────────
+    if (phase === "FINAL") {
+      if (action === "ROOT_CHILD_STAT") {
+        const nodeId = findChild("ROOT", payload.move);
+        if (nodeId) {
+          finalStats[nodeId] = {
+            rank: parseInt(payload.rank),
+            visitCount: parseInt(payload.visit_count),
+            q: parseFloat(payload.q),
+            prior: parseFloat(payload.prior),
+            policyProb: parseFloat(payload.policy_prob),
+          };
+          if (nodes[nodeId]) nodes[nodeId].state = "final-stat";
+        }
+
+      } else if (action === "DECISION") {
+        decisionMove = findChild("ROOT", payload.move);
+        if (decisionMove && nodes[decisionMove]) nodes[decisionMove].state = "decision";
+
+      }
+    }
+
+    // The active backprop edge: from the node's parent to the node itself.
+    // Derive directly from selectionStack (reliable) not backpropPath (grows too slowly).
+    // At depth_from_leaf=D: child=selectionStack[len-1-D], parent=selectionStack[len-2-D]
+    // Edges stored as from=parent, to=child.
+    let backpropActiveEdge = null;
+    if (phase === "BACKPROP" && action === "STEP") {
+      const d = parseInt(payload.depth_from_leaf);
+      const childIdx  = selectionStack.length - 1 - d;
+      const parentIdx = selectionStack.length - 2 - d;
+      if (childIdx >= 0 && parentIdx >= 0) {
+        backpropActiveEdge = {
+          from: selectionStack[parentIdx],
+          to:   selectionStack[childIdx],
+        };
+      }
+    }
+
+    snapshots.push({
+      phase, action,
+      payload: { ...payload },
+      board: boardCopy(),
+      nodes: nodesCopy(),
+      edges: edgesCopy(),
+      currentPlayer,
+      currentIter,
+      activePath: [...activePath],
+      selectionStack: [...selectionStack],
+      selectionDepth: selectionStack.length - 1,
+      backpropPath: [...backpropPath],
+      backpropActiveEdge,
+      activeNodeId,
+      puctScores: puctCopy(),
+      config: { ...config },
+      leafNNValue,
+      backpropValue,
+      decisionMove,
+      finalStats: { ...finalStats },
+    });
+  }
+
+  return snapshots;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   TREE LAYOUT — Buchheim-Brandes-Weiß (correct, no overlaps, no edge crossings)
+
+   Key invariants:
+   - prelim[v]   = x position relative to v's LEFT SIBLING (or 0 for first child)
+   - mod[v]      = amount to shift v's entire subtree (accumulated in second walk)
+   - Leaf spacing = NODE_W + H_GAP  (the atomic slot width)
+   - Internal node centres over its children
+   - Contour walk compares right contour of left subtree vs left contour of
+     right subtree depth-by-depth, finds worst overlap, shifts right subtree
+───────────────────────────────────────────────────────────────────────────── */
+const NODE_W   = 80;
+const NODE_H   = 100;
+const H_GAP    = 36;   // gap between node edges at same level
+const V_GAP    = 140;  // vertical distance between levels
+const HEADER_H = 14;
+const PUCT_H   = 68;
+
+// Minimum width a single node slot occupies (node + surrounding gap)
+const SLOT = NODE_W + H_GAP;
+
+function layoutTree(nodes) {
+  const pos = {};
+  if (!nodes["ROOT"]) return pos;
+
+  const ch = (id) => nodes[id]?.children ?? [];
+
+  // ── 1. Compute subtree width bottom-up (pure, no side effects) ────────────
+  // width[v] = total horizontal space the subtree rooted at v needs
+  const width = {};
+  // Post-order via iterative stack
+  const postOrder = [];
+  {
+    const stk = ["ROOT"];
+    while (stk.length) {
+      const v = stk.pop();
+      postOrder.push(v);
+      for (const c of ch(v)) stk.push(c);
+    }
+    postOrder.reverse();
+  }
+  for (const v of postOrder) {
+    const kids = ch(v);
+    if (kids.length === 0) {
+      width[v] = SLOT;
+    } else {
+      // sum of all children widths
+      const total = kids.reduce((s, c) => s + width[c], 0);
+      width[v] = Math.max(total, SLOT);
+    }
+  }
+
+  // ── 2. Assign absolute x by top-down BFS using width[] ───────────────────
+  // Root centres at x = 0.
+  // For each parent: spread children left-to-right within the parent's total
+  // width, each child occupying width[child] of horizontal space and being
+  // centred within its slot.
+  const absX = {};
+  const absY = {};
+  {
+    const queue = [["ROOT", 0, 0]];
+    let qi = 0;
+    while (qi < queue.length) {
+      const [v, px, depth] = queue[qi++];
+      absX[v] = px;
+      absY[v] = depth * (NODE_H + V_GAP);
+      const kids = ch(v);
+      if (kids.length === 0) continue;
+      // Total width of all children
+      const totalW = kids.reduce((s, c) => s + width[c], 0);
+      // Start x so children are centred under parent
+      let curX = px - totalW / 2;
+      for (const c of kids) {
+        // Centre of this child's slot
+        const cCentre = curX + width[c] / 2;
+        queue.push([c, cCentre, depth + 1]);
+        curX += width[c];
+      }
+    }
+  }
+
+  // ── 3. Verify and fix any remaining overlaps with a sweep ─────────────────
+  // Group nodes by depth, sort by x, push apart any that are too close.
+  const byDepth = {};
+  for (const v of Object.keys(absX)) {
+    const d = absY[v] / (NODE_H + V_GAP);
+    if (!byDepth[d]) byDepth[d] = [];
+    byDepth[d].push(v);
+  }
+  // For each depth, left-to-right sweep: if node[i+1].x < node[i].x + SLOT, push right
+  // Then propagate pushes upward to keep parents centred
+  const depths = Object.keys(byDepth).map(Number).sort((a, b) => a - b);
+  for (const d of depths) {
+    const row = byDepth[d].sort((a, b) => absX[a] - absX[b]);
+    for (let i = 1; i < row.length; i++) {
+      const minX = absX[row[i - 1]] + SLOT;
+      if (absX[row[i]] < minX) {
+        const shift = minX - absX[row[i]];
+        // Shift this node and all nodes to its right at this depth, plus all descendants
+        const toShift = new Set(row.slice(i));
+        // BFS descendants
+        const bfsQ = [...toShift];
+        let bi = 0;
+        while (bi < bfsQ.length) {
+          const bv = bfsQ[bi++];
+          for (const bc of ch(bv)) {
+            if (!toShift.has(bc)) { toShift.add(bc); bfsQ.push(bc); }
+          }
+        }
+        for (const sv of toShift) absX[sv] += shift;
+      }
+    }
+  }
+
+  // ── 4. Re-centre parents over their children (bottom-up) ─────────────────
+  for (const v of [...postOrder].reverse()) {
+    const kids = ch(v);
+    if (kids.length === 0) continue;
+    const leftX  = absX[kids[0]];
+    const rightX = absX[kids[kids.length - 1]];
+    absX[v] = (leftX + rightX) / 2;
+  }
+
+  // ── 5. Final: copy to positions ───────────────────────────────────────────
+  for (const v of Object.keys(absX)) {
+    pos[v] = { x: absX[v], y: absY[v] };
+  }
+
+  return pos;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MINI BOARD component (used inside SVG via foreignObject)
+───────────────────────────────────────────────────────────────────────────── */
+function MiniBoard({ boardState, highlightCell, size = 10 }) {
+  const gap = 1;
+  const total = size * 4 + gap * 3;
+  return (
+    <svg width={total} height={total} style={{ display: "block" }}>
+      {Array(4).fill(0).map((_, r) =>
+        Array(4).fill(0).map((_, c) => {
+          const cell = boardState?.[r]?.[c] ?? "empty";
+          const x = c * (size + gap);
+          const y = r * (size + gap);
+          const isHighlight = highlightCell && highlightCell.row === r && highlightCell.col === c;
+          const fill =
+            cell === "X" ? "#3b82f6" :
+            cell === "O" ? "#ef4444" :
+            "#1a2540";
+          return (
+            <g key={`${r}-${c}`}>
+              <rect x={x} y={y} width={size} height={size} fill={fill}
+                rx={1}
+                stroke={isHighlight ? "#00e5ff" : "#2a3450"}
+                strokeWidth={isHighlight ? 1.5 : 0.5} />
+              {cell !== "empty" && (
+                <text x={x + size / 2} y={y + size / 2 + 3.5} textAnchor="middle"
+                  fill="white" fontSize={size * 0.65} fontWeight="bold"
+                  fontFamily="monospace" style={{ pointerEvents: "none" }}>
+                  {cell}
+                </text>
+              )}
+            </g>
+          );
+        })
+      )}
+    </svg>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   THEME TOKENS
+───────────────────────────────────────────────────────────────────────────── */
+const THEMES = {
+  dark: {
+    name: "dark",
+    appBg: "#070d1a",
+    topBarBg: "#0d1117",
+    panelBg: "#080e1c",
+    panelBorder: "#1e2d4a",
+    mathBg: "#060c1a",
+    treeBg: "#070d1a",
+    treeGridLine: "#0d1829",
+    nodeBg: "#0d1829",
+    nodeRootBg: "#081828",
+    nodeBorder: "#1e2d4a",
+    nodeText: "#94a3b8",
+    nodeSubText: "#475569",
+    nodeLabel: "#64748b",
+    edgeInactive: "#1e3050",
+    btnBg: "#111827",
+    btnBorder: "#1e2d4a",
+    btnText: "#94a3b8",
+    btnAccentBg: "#00e5ff22",
+    btnAccentBorder: "#00e5ff",
+    btnAccentText: "#00e5ff",
+    divider: "#1e2d4a",
+    counterText: "#475569",
+    counterVal: "#94a3b8",
+    labelText: "#475569",
+    zoomBtnBg: "#0d1829",
+    zoomBtnBorder: "#1e2d4a",
+    zoomBtnText: "#64748b",
+    iterLabel: "#1e3050",
+    miniCellEmpty: "#1a2540",
+    miniCellBorder: "#2a3450",
+    boardCellEmpty: "#111827",
+    boardCellBorderEmpty: "#1e2d4a",
+    playerLabel: "#64748b",
+    nnBarBg: "#1e2d4a",
+    nnLabelColor: "#475569",
+    scrollbarTrack: "#0d1829",
+    scrollbarThumb: "#1e3050",
+    puctBg: "#0a0f1e",
+    puctBgWinner: "#1a1000",
+    puctBorder: "#1e2d4a",
+    puctBorderWinner: "#f59e0b",
+    puctText: "#475569",
+    puctTextWinner: "#fbbf24",
+    puctLabelWinner: "#f59e0b",
+    legendText: "#2a3450",
+    backpropBadgeBg: "#1a0510",
+    backpropBadgeBorder: "#f43f5e",
+    backpropBadgeText: "#fb7185",
+    backpropPanelBg: "#1a0510",
+    backpropPanelBorder: "#f43f5e",
+    backpropPanelText: "#fb7185",
+    toggleBg: "#111827",
+    toggleBorder: "#1e2d4a",
+    toggleText: "#64748b",
+    // Semantic accent colors (value-positive, value-negative, neutral-accent, purple, cyan, amber)
+    accentPos:    "#34d399",   // positive Q / wins
+    accentNeg:    "#fb7185",   // negative Q / losses / backprop
+    accentBlue:   "#60a5fa",   // U values / counts
+    accentPurple: "#a78bfa",   // priors / INIT
+    accentCyan:   "#38bdf8",   // NN / leaf
+    accentAmber:  "#fbbf24",   // PUCT winner / selection
+    accentGreen:  "#34d399",   // final / decision
+    loadLogColor: "#60a5fa",
+  },
+  light: {
+    name: "light",
+    appBg:       "#e8edf2",
+    topBarBg:    "#1e293b",
+    panelBg:     "#f0f4f8",
+    panelBorder: "#94a3b8",
+    mathBg:      "#e8edf2",
+    treeBg:      "#edf1f6",
+    treeGridLine:"#b0bac7",
+    nodeBg:           "#ffffff",
+    nodeRootBg:       "#eff6ff",
+    nodeBorder:       "#64748b",
+    nodeText:         "#0f172a",
+    nodeSubText:      "#334155",
+    nodeLabel:        "#475569",
+    edgeInactive: "#64748b",
+    btnBg:          "#2d3f55",
+    btnBorder:      "#4a6080",
+    btnText:        "#e2e8f0",
+    btnAccentBg:    "#0369a1",
+    btnAccentBorder:"#38bdf8",
+    btnAccentText:  "#ffffff",
+    divider:        "#4a6080",
+    counterText:    "#94a3b8",
+    counterVal:     "#f0f9ff",
+    labelText:      "#94a3b8",
+    zoomBtnBg:     "#ffffff",
+    zoomBtnBorder: "#64748b",
+    zoomBtnText:   "#1e293b",
+    iterLabel: "#475569",
+    miniCellEmpty:  "#c8d3df",
+    miniCellBorder: "#8899aa",
+    boardCellEmpty:       "#dde3ea",
+    boardCellBorderEmpty: "#7a8fa3",
+    playerLabel:   "#1e293b",
+    nnBarBg:       "#c8d3df",
+    nnLabelColor:  "#334155",
+    scrollbarTrack: "#dde3ea",
+    scrollbarThumb: "#94a3b8",
+    puctBg:          "#f0f4f8",
+    puctBgWinner:    "#fef3c7",
+    puctBorder:      "#64748b",
+    puctBorderWinner:"#b45309",
+    puctText:        "#1e293b",
+    puctTextWinner:  "#7c2d12",
+    puctLabelWinner: "#b45309",
+    legendText: "#7a8fa3",
+    backpropBadgeBg:    "#fff1f2",
+    backpropBadgeBorder:"#f43f5e",
+    backpropBadgeText:  "#9f1239",
+    backpropPanelBg:    "#fff1f2",
+    backpropPanelBorder:"#f43f5e",
+    backpropPanelText:  "#9f1239",
+    toggleBg:     "#2d3f55",
+    toggleBorder: "#4a6080",
+    toggleText:   "#e2e8f0",
+    // Semantic accent colors — darker versions for light bg readability
+    accentPos:    "#16803a",   // positive Q (dark green on white)
+    accentNeg:    "#be123c",   // negative Q (dark red on white)
+    accentBlue:   "#1d6fbd",   // U values / counts (dark blue)
+    accentPurple: "#6d28d9",   // priors / INIT (dark purple)
+    accentCyan:   "#0369a1",   // NN / leaf (dark sky)
+    accentAmber:  "#b45309",   // PUCT winner / selection (dark amber)
+    accentGreen:  "#16803a",   // final / decision (dark green)
+    loadLogColor: "#2563eb",
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PHASE BADGE COLORS  (same across themes — vivid is fine here)
+───────────────────────────────────────────────────────────────────────────── */
+const PHASE_COLORS = {
+  INIT:       { bg: "#2d1b69", border: "#7c3aed", text: "#a78bfa", label: "INIT" },
+  SELECTION:  { bg: "#451a03", border: "#d97706", text: "#fbbf24", label: "SELECTION" },
+  EVALUATION: { bg: "#0c2340", border: "#0284c7", text: "#38bdf8", label: "EVALUATION" },
+  BACKPROP:   { bg: "#3b0a1e", border: "#e11d48", text: "#fb7185", label: "BACKPROP" },
+  FINAL:      { bg: "#052e16", border: "#059669", text: "#34d399", label: "FINAL" },
+};
+
+/* Node border/glow accent colors are theme-independent vivid accents */
+const NODE_ACCENTS = {
+  "root":          { border: "#00e5ff", shadow: "0 0 0 2px #00e5ff, 0 0 18px rgba(0,229,255,0.35)" },
+  "normal":        { border: null,      shadow: "none" },
+  "new":           { border: "#22c55e", shadow: "0 0 0 2px #22c55e, 0 0 14px rgba(34,197,94,0.3)" },
+  "active":        { border: "#f59e0b", shadow: "0 0 0 2px #f59e0b, 0 0 16px rgba(245,158,11,0.35)" },
+  "selected":      { border: "#f59e0b", shadow: "0 0 0 2px #f59e0b, 0 0 20px rgba(245,158,11,0.45)" },
+  "puct-candidate":{ border: "#d97706", shadow: "0 0 0 1px #d97706, 0 0 10px rgba(217,119,6,0.2)" },
+  "leaf":          { border: "#38bdf8", shadow: "0 0 0 2px #38bdf8, 0 0 18px rgba(56,189,248,0.35)" },
+  "nn-query":      { border: "#38bdf8", shadow: "0 0 0 2px #38bdf8, 0 0 22px rgba(56,189,248,0.5)" },
+  "nn-result":     { border: "#22c55e", shadow: "0 0 0 2px #22c55e, 0 0 18px rgba(34,197,94,0.4)" },
+  "backprop":      { border: "#f43f5e", shadow: "0 0 0 2px #f43f5e, 0 0 18px rgba(244,63,94,0.35)" },
+  "terminal-win":  { border: "#10b981", shadow: "0 0 0 2px #10b981, 0 0 20px rgba(16,185,129,0.5)" },
+  "terminal-loss": { border: "#ef4444", shadow: "0 0 0 2px #ef4444, 0 0 20px rgba(239,68,68,0.4)" },
+  "final-stat":    { border: "#10b981", shadow: "0 0 0 1px #10b981" },
+  "decision":      { border: "#10b981", shadow: "0 0 0 3px #10b981, 0 0 24px rgba(16,185,129,0.6)" },
+};
+
+// Per-state background tints (dark mode; light mode just uses white)
+const NODE_BG_DARK = {
+  "root": "#081828", "normal": "#0d1829", "new": "#0d1829",
+  "active": "#1a1200", "selected": "#1a1200", "puct-candidate": "#100d00",
+  "leaf": "#050f1a", "nn-query": "#050f1a", "nn-result": "#061408",
+  "backprop": "#1a0510", "terminal-win": "#031a0e", "terminal-loss": "#1a0505",
+  "final-stat": "#0a1a10", "decision": "#031a0e",
+};
+
+// Per-state background tints for light mode
+const NODE_BG_LIGHT = {
+  "root":          "#eff6ff",
+  "normal":        "#ffffff",
+  "new":           "#f0fdf4",
+  "active":        "#fffbeb",
+  "selected":      "#fffbeb",
+  "puct-candidate":"#fefce8",
+  "leaf":          "#f0f9ff",
+  "nn-query":      "#f0f9ff",
+  "nn-result":     "#f0fdf4",
+  "backprop":      "#fff1f2",
+  "terminal-win":  "#f0fdf4",
+  "terminal-loss": "#fff1f2",
+  "final-stat":    "#f0fdf4",
+  "decision":      "#dcfce7",
+};
+
+function getNodeStyle(state, theme) {
+  const accent = NODE_ACCENTS[state] ?? NODE_ACCENTS["normal"];
+  const bg = theme.name === "dark"
+    ? (NODE_BG_DARK[state] ?? theme.nodeBg)
+    : (NODE_BG_LIGHT[state] ?? theme.nodeBg);
+  const border = accent.border ?? theme.nodeBorder;
+  return { border, shadow: accent.shadow, bg };
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   3-IN-A-ROW DETECTOR
+   Returns a Set of "r,c" strings for every cell that participates in at least
+   one 3-consecutive run (row / col / diagonal) for either player.
+───────────────────────────────────────────────────────────────────────────── */
+function getThreeInARowCells(board) {
+  const hits = new Set();
+  if (!board) return hits;
+
+  const mark = (cells) => cells.forEach(([r, c]) => hits.add(`${r},${c}`));
+
+  // All possible lines of 3+ on a 4×4 grid
+  const lines = [];
+
+  // Rows — every window of 3
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c <= 1; c++)
+      lines.push([[r,c],[r,c+1],[r,c+2]]);
+
+  // Cols — every window of 3
+  for (let c = 0; c < 4; c++)
+    for (let r = 0; r <= 1; r++)
+      lines.push([[r,c],[r+1,c],[r+2,c]]);
+
+  // Diagonals (top-left → bottom-right), length 3
+  for (let r = 0; r <= 1; r++)
+    for (let c = 0; c <= 1; c++)
+      lines.push([[r,c],[r+1,c+1],[r+2,c+2]]);
+
+  // Diagonals (top-right → bottom-left), length 3
+  for (let r = 0; r <= 1; r++)
+    for (let c = 2; c < 4; c++)
+      lines.push([[r,c],[r+1,c-1],[r+2,c-2]]);
+
+  for (const line of lines) {
+    const vals = line.map(([r,c]) => board?.[r]?.[c] ?? "empty");
+    const first = vals[0];
+    if (first !== "empty" && vals.every(v => v === first)) {
+      mark(line);
+    }
+  }
+  return hits;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MINI BOARD
+───────────────────────────────────────────────────────────────────────────── */
+function MiniBoard({ boardState, highlightCell, size = 10, theme }) {
+  const gap = 1;
+  const total = size * 4 + gap * 3;
+  const t = theme ?? THEMES.dark;
+  const threeInARow = getThreeInARowCells(boardState);
+  return (
+    <svg width={total} height={total} style={{ display: "block" }}>
+      {Array(4).fill(0).map((_, r) =>
+        Array(4).fill(0).map((_, c) => {
+          const cell = boardState?.[r]?.[c] ?? "empty";
+          const x = c * (size + gap);
+          const y = r * (size + gap);
+          const isHighlight = highlightCell && highlightCell.row === r && highlightCell.col === c;
+          const isThree = threeInARow.has(`${r},${c}`);
+          const fill =
+            isThree && cell === "X" ? "#1d4ed8" :   // darker blue for X 3-in-a-row
+            isThree && cell === "O" ? "#b91c1c" :   // darker red for O 3-in-a-row
+            cell === "X" ? "#3b82f6" :
+            cell === "O" ? "#ef4444" :
+            t.miniCellEmpty;
+          return (
+            <g key={`${r}-${c}`}>
+              <rect x={x} y={y} width={size} height={size} fill={fill} rx={1}
+                stroke={isHighlight ? "#000000" : t.miniCellBorder}
+                strokeWidth={isHighlight ? 1.5 : 0.5} />
+              {cell !== "empty" && (
+                <text x={x + size / 2} y={y + size / 2 + 3.5} textAnchor="middle"
+                  fill="white" fontSize={size * 0.65} fontWeight="bold"
+                  fontFamily="monospace" style={{ pointerEvents: "none" }}>
+                  {cell}
+                </text>
+              )}
+            </g>
+          );
+        })
+      )}
+    </svg>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   TREE NODE  — PUCT badge now renders BELOW the node, not to the right
+───────────────────────────────────────────────────────────────────────────── */
+function TreeNode({ node, pos, puctScore, isActiveBackprop, backpropValue, theme }) {
+  const t = theme ?? THEMES.dark;
+  const style = getNodeStyle(node.state, t);
+  const x = pos.x - NODE_W / 2;
+  // Card sits HEADER_H pixels below pos.y — header strip occupies the top gap
+  const cardY = pos.y + HEADER_H;
+  const headerY = pos.y;
+
+  // Visited vs unvisited visual treatment
+  const ACTIVE_STATES = new Set(["root","active","selected","puct-candidate","leaf","nn-query","nn-result","backprop","terminal-win","terminal-loss","final-stat","decision"]);
+  const isVisited    = node.visits > 0 || node.id === "ROOT";
+  const isActiveState = ACTIVE_STATES.has(node.state);
+  // Visited non-active nodes: dark blue contour
+  const visitedBorder = "#1e40af";
+  const effectiveBorder = (isVisited && !isActiveState) ? visitedBorder : style.border;
+  const effectiveShadow = (isVisited && !isActiveState)
+    ? `0 0 0 1.5px ${visitedBorder}, 0 0 8px rgba(30,64,175,0.35)`
+    : style.shadow;
+  // Unvisited non-active nodes: dim the card (not the PUCT badge)
+  const cardOpacity = (!isVisited && !isActiveState) ? 0.45 : 1;
+
+  const isWin  = node.terminalOutcome?.type === "win";
+  const isLoss = node.terminalOutcome?.type === "loss";
+  // winner player: if this node is a win, the node's player won
+  const winnerPlayer = isWin ? node.player : isLoss ? (node.player === "X" ? "O" : "X") : null;
+
+  const qColor = node.q > 0 ? t.accentPos : node.q < 0 ? t.accentNeg : t.nodeSubText;
+  const label  = node.move ? `(${node.move.row},${node.move.col})` : "ROOT";
+
+  // PUCT badge dimensions and position — centered below node card
+  const PUCT_W   = 90;
+  const PUCT_PAD = 8;
+  const puctX    = pos.x - PUCT_W / 2;
+  const puctY    = cardY + NODE_H + PUCT_PAD;
+
+  // Player pill colours
+  const playerBg   = node.player === "X" ? "#1d4ed8" : "#991b1b";
+  const playerGlow = node.player === "X" ? "rgba(59,130,246,0.55)" : "rgba(239,68,68,0.55)";
+
+  // Winner badge colours — amber/gold, distinct from X-blue and O-red
+  const winBg   = "#854d0e";  // dark amber bg
+  const winText = "#fde68a";  // pale gold text
+
+  return (
+    <g>
+      {/* ── header strip (above card, in SVG space — no overlap with board) ── */}
+      <foreignObject x={x} y={headerY} width={NODE_W} height={HEADER_H} style={{ opacity: cardOpacity }}>
+        <div style={{
+          width: NODE_W, height: HEADER_H,
+          display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 4px",
+          boxSizing: "border-box",
+          gap: 3,
+        }}>
+          {/* Player-to-move pill */}
+          <div style={{
+            background: playerBg,
+            color: "#fff",
+            fontSize: 7, fontWeight: "bold",
+            fontFamily: "'JetBrains Mono', monospace",
+            borderRadius: 3,
+            padding: "1px 5px",
+            lineHeight: 1.5,
+            letterSpacing: "0.05em",
+            flexShrink: 0,
+            boxShadow: `0 0 5px ${playerGlow}`,
+          }}>
+            {node.player}
+          </div>
+
+          {/* Winner badge — only shown on terminal nodes */}
+          {winnerPlayer && (
+            <div style={{
+              background: winBg,
+              color: winText,
+              fontSize: 7, fontWeight: "bold",
+              fontFamily: "'JetBrains Mono', monospace",
+              borderRadius: 3,
+              padding: "1px 5px",
+              lineHeight: 1.5,
+              letterSpacing: "0.04em",
+              flexShrink: 0,
+              boxShadow: "0 0 5px rgba(245,158,11,0.5)",
+              whiteSpace: "nowrap",
+            }}>
+              🏆 {winnerPlayer}
+            </div>
+          )}
+        </div>
+      </foreignObject>
+
+      {/* ── node card ── */}
+      <foreignObject x={x} y={cardY} width={NODE_W} height={NODE_H} style={{ opacity: cardOpacity }}>
+        <div style={{
+          width: NODE_W,
+          background: style.bg,
+          border: `1.5px solid ${effectiveBorder}`,
+          borderRadius: 6,
+          boxShadow: effectiveShadow,
+          display: "flex", flexDirection: "column", alignItems: "center",
+          padding: "5px 4px 5px",
+          boxSizing: "border-box",
+          transition: "box-shadow 0.3s, border-color 0.3s",
+          position: "relative",
+          overflow: "visible",
+          gap: 3,
+        }}>
+          <MiniBoard boardState={node.boardSnapshot} highlightCell={node.move} size={13} theme={t} />
+
+          {/* stats footer */}
+          {(() => {
+            const hasVal = node.nnValue !== null && node.nnValue !== undefined;
+            const termVal = node.terminalOutcome?.value;
+            const val = hasVal ? node.nnValue : (termVal !== undefined ? termVal : null);
+            const valColor = val === null ? t.nodeLabel
+              : val > 0.05 ? t.accentPos
+              : val < -0.05 ? t.accentNeg
+              : t.nodeSubText;
+            const valStr = val === null ? "—"
+              : (val >= 0 ? "+" : "") + val.toFixed(2);
+            return (
+              <div style={{
+                marginTop: 4, width: "100%",
+                fontFamily: "'JetBrains Mono', monospace",
+                lineHeight: 1.4, padding: "0 3px",
+                flexShrink: 0,
+              }}>
+                {/* row 1: vis  |  val */}
+                <div style={{
+                  display: "flex", justifyContent: "space-between",
+                  alignItems: "baseline", whiteSpace: "nowrap",
+                }}>
+                  <span style={{ fontSize: 7.5, color: t.nodeText }}>
+                    vis:{node.visits}
+                  </span>
+                  <span style={{ fontSize: 7.5, color: valColor, fontWeight: "bold" }}>
+                    {valStr}
+                  </span>
+                </div>
+
+              </div>
+            );
+          })()}
+
+          {/* backprop value badge — now shown on edge, removed from node */}
+        </div>
+      </foreignObject>
+
+      {/* ── PUCT badge below node, with a small connector line ── */}
+      {puctScore && (
+        <>
+          {/* connector line: from bottom-center of node to top-center of badge */}
+          <line
+            x1={pos.x} y1={cardY + NODE_H}
+            x2={pos.x} y2={puctY}
+            stroke={puctScore.isWinner ? "#f59e0b" : t.puctBorder}
+            strokeWidth={1}
+            strokeDasharray="3,2"
+            opacity={0.7}
+          />
+          <foreignObject x={puctX} y={puctY} width={PUCT_W} height={44}>
+            <div style={{
+              width: PUCT_W,
+              background: puctScore.isWinner ? t.puctBgWinner : t.puctBg,
+              border: `1px solid ${puctScore.isWinner ? t.puctBorderWinner : t.puctBorder}`,
+              borderRadius: 5,
+              padding: "3px 6px",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 7,
+              color: puctScore.isWinner ? t.puctTextWinner : t.puctText,
+              lineHeight: 1.5,
+              boxShadow: puctScore.isWinner ? "0 0 8px rgba(245,158,11,0.3)" : "none",
+              boxSizing: "border-box",
+            }}>
+              <div style={{
+                color: puctScore.isWinner ? t.puctLabelWinner : t.nodeLabel,
+                fontWeight: "bold", marginBottom: 1,
+              }}>
+                {puctScore.isWinner ? "★ " : ""}PUCT: {puctScore.puct.toFixed(2)}
+              </div>
+              <div>U: <span style={{ color: t.accentBlue }}>{puctScore.u.toFixed(2)}</span></div>
+            </div>
+          </foreignObject>
+        </>
+      )}
+    </g>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   EDGE
+───────────────────────────────────────────────────────────────────────────── */
+function TreeEdge({ fromPos, toPos, edge, childQ, isActive, isBackprop, isBest, backpropValue, theme }) {
+  const t = theme ?? THEMES.dark;
+  const fx = fromPos.x;
+  const fy = fromPos.y + HEADER_H + NODE_H;
+  const tx = toPos.x;
+  const ty = toPos.y;
+  const mx = (fx + tx) / 2;
+  const my = (fy + ty) / 2;
+
+  // ── EXACT colors/animation from reference ──────────────────────────────────
+  const color = isBackprop ? "#f43f5e" : isActive ? "#00e5ff" : isBest ? "#10b981" : t.edgeInactive;
+  const opacity = isActive || isBackprop || isBest ? 1 : 0.5;
+  const strokeW = isBest ? 2.5 : isActive || isBackprop ? 2 : 1;
+  const dashArray = isActive || isBackprop ? "4,3" : "none";
+
+  const path = `M ${fx} ${fy} C ${fx} ${my}, ${tx} ${my}, ${tx} ${ty}`;
+
+  const qNum = childQ ?? 0;
+
+  const qColor = isActive || isBackprop || isBest
+    ? color
+    : qNum > 0.05 ? t.accentPos : qNum < -0.05 ? t.accentNeg : t.nodeText;
+  const pColor = isActive || isBackprop || isBest ? color : t.nodeText;
+
+  const haloBg = t.name === "light" ? "#edf1f6" : "#070d1a";
+
+  const bt = 0.72;
+  const bmt = 1 - bt;
+  const bLx = bmt*bmt*bmt*fx + 3*bmt*bmt*bt*fx + 3*bmt*bt*bt*tx + bt*bt*bt*tx;
+  const bLy = bmt*bmt*bmt*fy + 3*bmt*bmt*bt*my + 3*bmt*bt*bt*my + bt*bt*bt*ty;
+
+  const haloProps = {
+    textAnchor: "middle",
+    fontFamily: "monospace",
+    fontSize: 6,
+    fontWeight: "bold",
+    stroke: haloBg,
+    strokeWidth: 3,
+    strokeLinejoin: "round",
+    paintOrder: "stroke fill",
+  };
+
+  return (
+    <g>
+      <path d={path} fill="none" stroke={color} strokeWidth={strokeW}
+        strokeOpacity={opacity}
+        strokeDasharray={dashArray}
+        style={isActive || isBackprop ? {
+          animation: `dashFlow${isBackprop ? "Up" : "Down"} 1s linear infinite`,
+        } : {}}
+      />
+      {/* q and P labels — hidden on active backprop edge to avoid clutter */}
+      {!isBackprop && (
+        <>
+          <text x={bLx} y={bLy - 5} {...haloProps} fill={qColor}>
+            q:{qNum >= 0 ? "+" : ""}{qNum.toFixed(2)}
+          </text>
+          <text x={bLx} y={bLy + 5} {...haloProps} fill={pColor}>
+            P:{edge.prior.toFixed(2)}
+          </text>
+        </>
+      )}
+
+      {/* Backprop value badge — floats on active backprop edge midpoint */}
+      {isBackprop && backpropValue !== null && backpropValue !== undefined && (() => {
+        // Midpoint of the bezier at t=0.5
+        const bt2 = 0.5, bmt2 = 0.5;
+        const badgeX = bmt2*bmt2*bmt2*fx + 3*bmt2*bmt2*bt2*fx + 3*bmt2*bt2*bt2*tx + bt2*bt2*bt2*tx;
+        const badgeY = bmt2*bmt2*bmt2*fy + 3*bmt2*bmt2*bt2*my + 3*bmt2*bt2*bt2*my + bt2*bt2*bt2*ty;
+        const label = (backpropValue >= 0 ? "+" : "") + backpropValue.toFixed(3);
+        const bw = label.length * 6 + 12;
+        return (
+          <g>
+            <rect x={badgeX - bw/2} y={badgeY - 9} width={bw} height={18}
+              rx={4} ry={4}
+              fill="#fff1f2" stroke="#f43f5e" strokeWidth={1.2}
+            />
+            <text x={badgeX} y={badgeY + 4}
+              textAnchor="middle"
+              fontFamily="monospace" fontSize={9} fontWeight="bold"
+              fill="#be123c"
+            >{label}</text>
+          </g>
+        );
+      })()}
+    </g>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LEFT BOARD PANEL
+───────────────────────────────────────────────────────────────────────────── */
+function BoardPanel({ snapshot, theme }) {
+  if (!snapshot) return null;
+  const t = theme ?? THEMES.dark;
+  const { board, currentPlayer, phase, action, payload, leafNNValue, backpropValue } = snapshot;
+  const highlightCell = action === "LEVEL_DECISION" ? parseMove(payload.chosen) :
+    action === "MOVE_APPLIED" ? parseMove(payload.move) : null;
+
+  const nnVal = leafNNValue ?? 0;
+  const valColor = nnVal > 0.1 ? t.accentPos : nnVal < -0.1 ? t.accentNeg : t.nodeSubText;
+
+  return (
+    <div style={{
+      width: 210, minWidth: 210, height: "100%",
+      background: t.panelBg,
+      borderRight: `1px solid ${t.panelBorder}`,
+      display: "flex", flexDirection: "column",
+      padding: "12px 10px", gap: 10,
+    }}>
+      <div style={{
+        fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 10,
+        color: t.nodeSubText, letterSpacing: "0.1em", textTransform: "uppercase",
+      }}>
+        Board State
+      </div>
+
+      {/* 4×4 board */}
+      {(() => {
+        const threeInARow = getThreeInARowCells(board);
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 40px)", gap: 2 }}>
+            {Array(4).fill(0).map((_, r) =>
+              Array(4).fill(0).map((_, c) => {
+                const cell = board[r][c];
+                const isHL = highlightCell && highlightCell.row === r && highlightCell.col === c;
+                const isThree = threeInARow.has(`${r},${c}`);
+                const bg =
+                  isThree     ? "#14532d" :
+                  cell === "X" ? "#1e3a8a" :
+                  cell === "O" ? "#7f1d1d" :
+                  t.boardCellEmpty;
+                const bdr =
+                  isHL    ? "#00e5ff" :
+                  isThree ? "#22c55e" :
+                  cell === "X" ? "#3b82f6" :
+                  cell === "O" ? "#ef4444" :
+                  t.boardCellBorderEmpty;
+                const textColor = cell !== "empty" ? "#ffffff" : "transparent";
+                return (
+                  <div key={`${r}-${c}`} style={{
+                    width: 40, height: 40,
+                    background: bg,
+                    border: `2px solid ${bdr}`,
+                    borderRadius: 4,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18, fontWeight: "bold",
+                    color: textColor, fontFamily: "monospace",
+                    boxShadow: isHL
+                      ? "0 0 0 1px #00e5ff, 0 0 8px rgba(0,229,255,0.4)"
+                      : isThree
+                        ? "0 0 0 1px #22c55e, 0 0 8px rgba(34,197,94,0.4)"
+                        : "none",
+                    transition: "all 0.2s",
+                    animation: isHL ? "pulseBorder 1s ease-in-out infinite" : "none",
+                  }}>
+                    {cell !== "empty" ? cell : ""}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        );
+      })()}
+
+      {/* player indicator */}
+      <div style={{
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+        color: t.playerLabel, display: "flex", alignItems: "center", gap: 6,
+      }}>
+        <span>Turn:</span>
+        <span style={{
+          color: currentPlayer === "X" ? "#3b82f6" : "#ef4444",
+          fontWeight: "bold", fontSize: 13,
+        }}>{currentPlayer}</span>
+      </div>
+
+      {/* NN value bar */}
+      <div>
+        <div style={{ fontFamily: "monospace", fontSize: 9, color: t.nnLabelColor, marginBottom: 4 }}>
+          NN Value
+        </div>
+        <div style={{
+          height: 6, background: t.nnBarBg, borderRadius: 3,
+          position: "relative", overflow: "hidden",
+        }}>
+          <div style={{
+            position: "absolute", left: "50%", top: 0, bottom: 0,
+            width: `${Math.abs(nnVal) * 50}%`,
+            background: valColor,
+            transform: nnVal >= 0 ? "translateX(0)" : "translateX(-100%)",
+            borderRadius: 3, transition: "width 0.3s, transform 0.3s",
+          }} />
+          <div style={{
+            position: "absolute", left: "50%", top: -1, bottom: -1,
+            width: 1, background: t.nodeSubText,
+          }} />
+        </div>
+        <div style={{
+          display: "flex", justifyContent: "space-between",
+          fontFamily: "monospace", fontSize: 8, color: t.nodeLabel, marginTop: 2,
+        }}>
+          <span>−1</span>
+          <span style={{ color: valColor, fontSize: 10, fontWeight: "bold" }}>
+            {nnVal >= 0 ? "+" : ""}{nnVal.toFixed(3)}
+          </span>
+          <span>+1</span>
+        </div>
+      </div>
+
+      {/* backprop value */}
+      {backpropValue !== null && (
+        <div style={{
+          background: t.backpropPanelBg,
+          border: `1px solid ${t.backpropPanelBorder}`,
+          borderRadius: 5, padding: "5px 8px",
+          fontFamily: "monospace", fontSize: 9, color: t.backpropPanelText,
+        }}>
+          <div style={{ color: t.backpropPanelBorder, marginBottom: 2 }}>↑ Backprop</div>
+          <div style={{ fontSize: 13, fontWeight: "bold" }}>
+            {backpropValue >= 0 ? "+" : ""}{backpropValue.toFixed(4)}
+          </div>
+        </div>
+      )}
+
+      {/* coord legend */}
+      <div style={{ marginTop: "auto", fontFamily: "monospace", fontSize: 8, color: t.legendText, lineHeight: 1.6 }}>
+        <div>row(x): 0→3 ↓</div>
+        <div>col(y): 0→3 →</div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MATH / EXPLANATION PANEL
+───────────────────────────────────────────────────────────────────────────── */
+function MathPanel({ snapshot, theme, height, onResizeStart }) {
+  if (!snapshot) return null;
+  const t = theme ?? THEMES.dark;
+  const { phase, action, payload, config } = snapshot;
+
+  const tx    = t.nodeText;
+  const dim   = t.nodeSubText;
+  const faint = t.nodeLabel;
+  const c     = config?.explorationFactor?.toFixed(3) ?? "1.414";
+
+  // ── Shared styled helpers ──────────────────────────────────────────────────
+
+  // Section header
+  const Header = ({ color, children }) => (
+    <div style={{ color, fontWeight: "bold", fontSize: 17, marginBottom: 10, letterSpacing: "0.02em" }}>
+      {children}
+    </div>
+  );
+
+  // A standalone block math formula rendered as a boxed div
+  const FormulaBox = ({ children, accent }) => (
+    <div style={{
+      margin: "10px 0",
+      padding: "10px 18px",
+      background: t.name === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+      border: `1.5px solid ${accent ?? t.panelBorder}`,
+      borderLeft: `4px solid ${accent ?? t.accentBlue}`,
+      borderRadius: 6,
+      fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 15,
+      color: tx,
+      lineHeight: 2.2,
+      overflowX: "auto",
+    }}>
+      {children}
+    </div>
+  );
+
+  // A fraction: numerator / denominator stacked vertically
+  const Frac = ({ num, den, color }) => (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "middle", margin: "0 3px", lineHeight: 1.2 }}>
+      <span style={{ borderBottom: `1.5px solid ${color ?? tx}`, paddingBottom: 1, minWidth: 20, textAlign: "center", fontSize: 14 }}>{num}</span>
+      <span style={{ paddingTop: 1, minWidth: 20, textAlign: "center", fontSize: 14 }}>{den}</span>
+    </span>
+  );
+
+  // Inline value chip
+  const Val = ({ v, color, bold }) => (
+    <span style={{ color: color ?? tx, fontWeight: bold ? "bold" : "normal", fontSize: 15 }}>{v}</span>
+  );
+
+  // Label row beneath formula
+  const LabelRow = ({ items }) => (
+    <div style={{ display: "flex", gap: 24, marginTop: 4, flexWrap: "wrap" }}>
+      {items.map(({ label, val, color }) => (
+        <span key={label} style={{ fontSize: 13, color: faint }}>
+          {label} = <span style={{ color: color ?? tx, fontWeight: "bold" }}>{val}</span>
+        </span>
+      ))}
+    </div>
+  );
+
+  // Paragraph text
+  const P = ({ children, style: s }) => (
+    <div style={{ fontSize: 14, color: dim, lineHeight: 1.7, marginTop: 6, ...s }}>{children}</div>
+  );
+
+  let content = null;
+
+  // ── PUCT Candidate ──────────────────────────────────────────────────────────
+  if (phase === "SELECTION" && action === "PUCT_CANDIDATE") {
+    const q    = parseFloat(payload.q);
+    const u    = parseFloat(payload.u);
+    const puct = parseFloat(payload.puct);
+    const prior = parseFloat(payload.prior);
+    const pN   = parseInt(payload.parent_visits);
+    const cN   = parseInt(payload.child_visits);
+    const mv   = payload.move?.replace(/,d\d+,t-?\d+/, "") ?? payload.move;
+    content = (
+      <div>
+        <Header color="#f59e0b">PUCT Score Calculation — node {mv}</Header>
+        <P>Formula</P>
+        <FormulaBox accent="#f59e0b">
+          <span style={{ color: "#f59e0b", fontWeight: "bold" }}>PUCT(s,a)</span>
+          {" = "}
+          <span style={{ color: t.accentPos }}>Q(s,a)</span>
+          {" + "}
+          <span style={{ color: t.accentBlue }}>c</span>
+          {" · "}
+          <span style={{ color: t.accentPurple }}>P(s,a)</span>
+          {" · "}
+          <Frac
+            num={<span style={{ color: tx }}>√<span style={{ color: t.accentAmber }}>N(s)</span></span>}
+            den={<span><span style={{ color: t.accentCyan }}>N(s,a)</span> + 1</span>}
+            color={tx}
+          />
+        </FormulaBox>
+        <FormulaBox accent="#f59e0b">
+          <Val v={puct.toFixed(4)} color="#f59e0b" bold />
+          {" = "}
+          <Val v={q.toFixed(4)} color={q >= 0 ? t.accentPos : t.accentNeg} />
+          {" + "}
+          <Val v={c} color={t.accentBlue} />
+          {" · "}
+          <Val v={prior.toFixed(4)} color={t.accentPurple} />
+          {" · "}
+          <Frac
+            num={<span>√<Val v={pN} color={t.accentAmber} /></span>}
+            den={<span><Val v={cN} color={t.accentCyan} /> + 1</span>}
+            color={tx}
+          />
+          {"  =  "}
+          <Val v={q.toFixed(4)} color={q >= 0 ? t.accentPos : t.accentNeg} />
+          {" + "}
+          <Val v={u.toFixed(4)} color={t.accentBlue} bold />
+        </FormulaBox>
+        <LabelRow items={[
+          { label: "Q(s,a)", val: q.toFixed(4), color: q >= 0 ? t.accentPos : t.accentNeg },
+          { label: "U (exploration)", val: u.toFixed(4), color: t.accentBlue },
+          { label: "c_puct", val: c, color: t.accentBlue },
+          { label: "P(s,a)", val: prior.toFixed(4), color: t.accentPurple },
+          { label: "N(s)", val: pN, color: t.accentAmber },
+          { label: "N(s,a)", val: cN, color: t.accentCyan },
+        ]} />
+      </div>
+    );
+
+  // ── Selection Decision ──────────────────────────────────────────────────────
+  } else if (phase === "SELECTION" && action === "LEVEL_DECISION") {
+    const mv   = payload.chosen?.replace(/,d\d+,t-?\d+/, "") ?? payload.chosen;
+    const best = parseFloat(payload.winning_puct);
+    const dep  = payload.depth;
+    content = (
+      <div>
+        <Header color="#f59e0b">Selection Decision — depth {dep}</Header>
+        <P>Best child chosen by argmax over PUCT scores at this tree level:</P>
+        <FormulaBox accent="#f59e0b">
+          <Val v="a*" color="#f59e0b" bold />
+          {" = argmax"}
+          <sub style={{ fontSize: 11, color: dim }}>a</sub>
+          {" [ "}
+          <Val v="Q(s,a)" color={t.accentPos} />
+          {" + "}
+          <Val v="c" color={t.accentBlue} />
+          {" · "}
+          <Val v="P(s,a)" color={t.accentPurple} />
+          {" · "}
+          <Frac
+            num={<span>√<Val v="N(s)" color={t.accentAmber} /></span>}
+            den={<span><Val v="N(s,a)" color={t.accentCyan} /> + 1</span>}
+            color={tx}
+          />
+          {" ]"}
+        </FormulaBox>
+        <FormulaBox accent="#f59e0b">
+          <Val v="a*" color="#f59e0b" bold />
+          {" = "}
+          <Val v={mv} color="#f59e0b" bold />
+          {"   with   PUCT = "}
+          <Val v={best.toFixed(4)} color="#f59e0b" bold />
+        </FormulaBox>
+        <P>Descend tree: move is applied to board, cursor advances to chosen node.</P>
+      </div>
+    );
+
+  // ── NN Evaluation ───────────────────────────────────────────────────────────
+  } else if (phase === "EVALUATION" && action === "NN_RESULT") {
+    const mv = payload.move?.replace(/,d\d+,t-?\d+/, "") ?? payload.move;
+    const v  = parseFloat(payload.nn_value);
+    content = (
+      <div>
+        <Header color={t.accentCyan}>Neural Network Evaluation — node {mv}</Header>
+        <P>The network receives a 2-plane 4×4 tensor and outputs a policy + scalar value:</P>
+        <FormulaBox accent={t.accentCyan}>
+          {"("}
+          <Val v="π" color={t.accentPurple} bold />
+          {", "}
+          <Val v="v" color={t.accentCyan} bold />
+          {")  =  f"}
+          <sub style={{ fontSize: 11 }}>θ</sub>
+          {"(board_state)"}
+        </FormulaBox>
+        <FormulaBox accent={t.accentCyan}>
+          {"v  =  "}
+          <Val v={`${v >= 0 ? "+" : ""}${v.toFixed(4)}`} color={v >= 0 ? t.accentPos : t.accentNeg} bold />
+          {"   ← from "}
+          <Val v={payload.player ?? "current player"} color={tx} />
+          {"'s perspective"}
+        </FormulaBox>
+        <LabelRow items={[
+          { label: "children created", val: payload.children_created, color: t.accentBlue },
+        ]} />
+      </div>
+    );
+
+  // ── Terminal ─────────────────────────────────────────────────────────────────
+  } else if (phase === "EVALUATION" && (action === "TERMINAL_WIN" || action === "TERMINAL_LOSS")) {
+    const mv   = payload.move?.replace(/,d\d+,t-?\d+/, "") ?? payload.move;
+    const v    = parseFloat(payload.value);
+    const isWin = action === "TERMINAL_WIN";
+    content = (
+      <div>
+        <Header color={isWin ? t.accentPos : t.accentNeg}>
+          Terminal State — {isWin ? "🏆 WIN" : "✗ LOSS"} at {mv}
+        </Header>
+        <P>{isWin ? `Winner: ${payload.winner}` : `Loser: ${payload.loser}`}</P>
+        <FormulaBox accent={isWin ? t.accentPos : t.accentNeg}>
+          {"v  =  "}
+          <Val v={`${v >= 0 ? "+" : ""}${v.toFixed(4)}`} color={isWin ? t.accentPos : t.accentNeg} bold />
+          {"  (game outcome — no NN query needed)"}
+        </FormulaBox>
+        <P>Game result propagated directly into the backpropagation step.</P>
+      </div>
+    );
+
+  // ── Backprop Step ───────────────────────────────────────────────────────────
+  } else if (phase === "BACKPROP" && action === "STEP") {
+    const mv  = payload.move === "ROOT" ? "ROOT" : payload.move?.replace(/,d\d+,t-?\d+/, "");
+    const va  = parseFloat(payload.value_applied);
+    const acc = parseFloat(payload.acc_value);
+    const vis = parseInt(payload.visit_count);
+    const q   = parseFloat(payload.q);
+    const depthFromLeaf = parseInt(payload.depth_from_leaf);
+    const totalDepth = snapshot.selectionDepth ?? depthFromLeaf;
+    const treeDepth = totalDepth - depthFromLeaf;
+    content = (
+      <div>
+        <Header color={t.accentNeg}>Backpropagation — tree depth {treeDepth}</Header>
+        <P>Value is negated at each level (alternating player perspective), then accumulated:</P>
+        <FormulaBox accent={t.accentNeg}>
+          {"W(s,a)  ←  W(s,a)  +  "}
+          <Val v="v" color={t.accentNeg} bold />
+          {"         (negate each level)"}
+        </FormulaBox>
+        <FormulaBox accent={t.accentNeg}>
+          {"N(s,a)  ←  N(s,a)  +  1"}
+        </FormulaBox>
+        <FormulaBox accent={t.accentPos}>
+          {"Q(s,a)  =  "}
+          <Frac
+            num={<span><Val v="W(s,a)" color={t.accentNeg} /></span>}
+            den={<span><Val v="N(s,a)" color={t.accentCyan} /></span>}
+            color={tx}
+          />
+          {"  =  "}
+          <Frac
+            num={<Val v={acc.toFixed(3)} color={t.accentNeg} />}
+            den={<Val v={vis} color={t.accentCyan} />}
+            color={tx}
+          />
+          {"  =  "}
+          <Val v={`${q >= 0 ? "+" : ""}${q.toFixed(4)}`} color={q >= 0 ? t.accentPos : t.accentNeg} bold />
+        </FormulaBox>
+        <LabelRow items={[
+          { label: "node", val: mv, color: "#f43f5e" },
+          { label: "v applied", val: `${va >= 0 ? "+" : ""}${va.toFixed(4)}`, color: va >= 0 ? t.accentPos : t.accentNeg },
+          { label: "N", val: `${vis - 1} → ${vis}`, color: t.accentCyan },
+          { label: "Q", val: `${q >= 0 ? "+" : ""}${q.toFixed(4)}`, color: q >= 0 ? t.accentPos : t.accentNeg },
+        ]} />
+      </div>
+    );
+
+  // ── Backprop Done ───────────────────────────────────────────────────────────
+  } else if (phase === "BACKPROP" && action === "DONE") {
+    const rootQ = parseFloat(payload.root_q);
+    content = (
+      <div>
+        <Header color={t.accentNeg}>Backpropagation Complete — Root Updated</Header>
+        <P>All nodes from leaf to root have been updated. Iteration complete.</P>
+        <FormulaBox accent={t.accentPos}>
+          {"Q(root)  =  "}
+          <Frac
+            num={<Val v={parseFloat(payload.root_acc).toFixed(3)} color={t.accentNeg} />}
+            den={<Val v={payload.root_visits} color={t.accentCyan} />}
+            color={tx}
+          />
+          {"  =  "}
+          <Val v={`${rootQ >= 0 ? "+" : ""}${rootQ.toFixed(4)}`} color={rootQ >= 0 ? t.accentPos : t.accentNeg} bold />
+        </FormulaBox>
+        <LabelRow items={[
+          { label: "root visits", val: payload.root_visits, color: t.accentCyan },
+          { label: "root acc", val: parseFloat(payload.root_acc).toFixed(4), color: t.accentNeg },
+        ]} />
+        <P>Ready for next selection pass.</P>
+      </div>
+    );
+
+  // ── Root Expanded ───────────────────────────────────────────────────────────
+  } else if (phase === "INIT" && action === "ROOT_EXPANDED") {
+    const v = parseFloat(payload.nn_value);
+    content = (
+      <div>
+        <Header color={t.accentPurple}>Root Expanded with Dirichlet Noise</Header>
+        <FormulaBox accent={t.accentPurple}>
+          {"P̃(s,a)  =  (1 − ε) · π"}
+          <sub style={{ fontSize: 11 }}>nn</sub>
+          {"(a)  +  ε · η"}
+          <sub style={{ fontSize: 11 }}>a</sub>
+          {"       η ~ Dir(α)"}
+        </FormulaBox>
+        <LabelRow items={[
+          { label: "ε", val: payload.dirichlet_epsilon, color: t.accentAmber },
+          { label: "α", val: payload.dirichlet_alpha, color: t.accentPurple },
+          { label: "children", val: payload.num_children, color: t.accentBlue },
+          { label: "v (root)", val: `${v >= 0 ? "+" : ""}${v.toFixed(4)}`, color: v >= 0 ? t.accentPos : t.accentNeg },
+        ]} />
+      </div>
+    );
+
+  // ── Final Decision ──────────────────────────────────────────────────────────
+  } else if (phase === "FINAL" && action === "DECISION") {
+    const mv  = payload.move?.replace(/,d\d+,t-?\d+/, "") ?? payload.move;
+    const tau = parseFloat(payload.temperature);
+    const fq  = parseFloat(payload.q);
+    content = (
+      <div>
+        <Header color={t.accentGreen}>Final Move Selection  (τ = {tau.toFixed(2)}, {payload.selection_mode})</Header>
+        <FormulaBox accent={t.accentGreen}>
+          {"π"}
+          <sub style={{ fontSize: 11 }}>mcts</sub>
+          {"(a)  =  "}
+          <Frac
+            num={<span>N(s,a)<sup style={{ fontSize: 11 }}>1/τ</sup></span>}
+            den={<span>Σ N(s,b)<sup style={{ fontSize: 11 }}>1/τ</sup></span>}
+            color={tx}
+          />
+        </FormulaBox>
+        <FormulaBox accent={t.accentGreen}>
+          {"a*  =  "}
+          <Val v={mv} color={t.accentGreen} bold />
+          {"   |  N = "}<Val v={payload.visit_count} color={t.accentCyan} />
+          {"   |  Q = "}<Val v={`${fq >= 0 ? "+" : ""}${fq.toFixed(4)}`} color={fq >= 0 ? t.accentPos : t.accentNeg} bold />
+        </FormulaBox>
+        <P>π_mcts is used as the training target for the neural network policy head.</P>
+      </div>
+    );
+
+  // ── Search Start ────────────────────────────────────────────────────────────
+  } else if (phase === "INIT" && action === "SEARCH_START") {
+    content = (
+      <div>
+        <Header color={t.accentPurple}>MCTS Search Initialized</Header>
+        <LabelRow items={[
+          { label: "player", val: payload.player, color: payload.player === "X" ? "#3b82f6" : "#ef4444" },
+          { label: "iterations", val: payload.total_iterations, color: t.accentBlue },
+          { label: "c_puct", val: parseFloat(payload.exploration_factor).toFixed(4), color: t.accentBlue },
+          { label: "τ", val: payload.temperature, color: t.accentAmber },
+          { label: "α_Dir", val: payload.dirichlet_alpha, color: t.accentPurple },
+          { label: "ε", val: payload.dirichlet_epsilon, color: t.accentPurple },
+        ]} />
+      </div>
+    );
+
+  // ── Leaf Reached ────────────────────────────────────────────────────────────
+  } else if (phase === "SELECTION" && action === "LEAF_REACHED") {
+    const mv = payload.move?.replace(/,d\d+,t-?\d+/, "") ?? payload.move;
+    content = (
+      <div>
+        <Header color={t.accentCyan}>Leaf Node Reached — {mv}</Header>
+        <LabelRow items={[
+          { label: "depth", val: payload.depth, color: t.accentBlue },
+          { label: "already expanded", val: payload.already_expanded, color: t.accentAmber },
+          { label: "visits", val: payload.visit_count, color: t.accentCyan },
+        ]} />
+        <P>{payload.already_expanded === "false"
+          ? "→ Node never evaluated. Will query neural network and expand children."
+          : "→ Already expanded. Will evaluate position directly."}</P>
+      </div>
+    );
+
+  // ── Fallback ─────────────────────────────────────────────────────────────────
+  } else {
+    content = (
+      <div>
+        <div style={{ fontSize: 15, color: dim, marginBottom: 8 }}>
+          <span style={{ color: tx }}>{phase}</span> / <span style={{ color: t.accentBlue }}>{action}</span>
+        </div>
+        {Object.entries(payload).map(([k, v]) => (
+          <div key={k} style={{ fontSize: 14, color: dim, marginBottom: 2 }}>
+            <span style={{ color: faint }}>{k}</span>
+            {" = "}
+            <span style={{ color: tx }}>{v}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      height: height ?? 280,
+      minHeight: 80,
+      maxHeight: "70vh",
+      background: t.mathBg,
+      borderTop: `1px solid ${t.panelBorder}`,
+      display: "flex", flexDirection: "column",
+      position: "relative",
+      flexShrink: 0,
+    }}>
+      {/* ── Drag handle ── */}
+      <div
+        onMouseDown={onResizeStart}
+        style={{
+          position: "absolute", top: 0, left: 0, right: 0,
+          height: 6,
+          cursor: "ns-resize",
+          zIndex: 20,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "transparent",
+        }}
+      >
+        {/* Visible grip pill */}
+        <div style={{
+          width: 40, height: 3, borderRadius: 2,
+          background: t.panelBorder,
+          transition: "background 0.2s",
+          pointerEvents: "none",
+        }}/>
+      </div>
+
+      {/* ── Content ── */}
+      <div style={{
+        flex: 1,
+        padding: "14px 24px",
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 14, lineHeight: 1.7,
+        overflowY: "auto",
+        overflowX: "hidden",
+        marginTop: 6,
+      }}>
+        {content}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MAIN APP
+───────────────────────────────────────────────────────────────────────────── */
+function MCTSVisualizer() {
+  const [actions, setActions] = useState([]);
+  const [snapshots, setSnapshots] = useState([]);
+  const [idx, setIdx] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [loaded, setLoaded] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [mathPanelHeight, setMathPanelHeight] = useState(280);
+  const resizing = useRef(false);
+  const resizeStartY = useRef(0);
+  const resizeStartH = useRef(280);
+
+  const onResizeStart = useCallback((e) => {
+    resizing.current = true;
+    resizeStartY.current = e.clientY;
+    resizeStartH.current = mathPanelHeight;
+    e.preventDefault();
+  }, [mathPanelHeight]);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizing.current) return;
+      const dy = resizeStartY.current - e.clientY;  // drag up = taller
+      const newH = Math.max(80, Math.min(window.innerHeight * 0.7, resizeStartH.current + dy));
+      setMathPanelHeight(newH);
+      document.body.classList.add("resizing");
+    };
+    const onUp = () => {
+      resizing.current = false;
+      document.body.classList.remove("resizing");
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const theme = darkMode ? THEMES.dark : THEMES.light;
+
+  // SVG pan/zoom
+  const [transform, setTransform] = useState({ x: 300, y: 40, scale: 1 });
+  const svgRef = useRef(null);
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  // Load demo on mount
+  useEffect(() => {
+    const acts = parseLog(DEMO_LOG);
+    const snaps = computeSnapshots(acts);
+    setActions(acts);
+    setSnapshots(snaps);
+    setLoaded(true);
+    setIdx(0);
+  }, []);
+
+  // Auto-play
+  useEffect(() => {
+    if (!playing || snapshots.length === 0) return;
+    const delay = 800 / speed;
+    const timer = setInterval(() => {
+      setIdx((prev) => {
+        if (prev >= snapshots.length - 1) { setPlaying(false); return prev; }
+        return prev + 1;
+      });
+    }, delay);
+    return () => clearInterval(timer);
+  }, [playing, speed, snapshots.length]);
+
+  const loadLog = useCallback((text) => {
+    const acts = parseLog(text);
+    const snaps = computeSnapshots(acts);
+    setActions(acts);
+    setSnapshots(snaps);
+    setIdx(0);
+    setPlaying(false);
+    setLoaded(true);
+  }, []);
+
+  const handleFile = useCallback((e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => loadLog(ev.target.result);
+    reader.readAsText(file);
+  }, [loadLog]);
+
+  const snapshot = snapshots[idx] ?? null;
+
+  // Navigation
+  const prevAction = () => setIdx((p) => Math.max(0, p - 1));
+  const nextAction = () => setIdx((p) => Math.min(snapshots.length - 1, p + 1));
+
+  const prevIter = () => {
+    if (!snapshot) return;
+    const curIter = snapshot.currentIter;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (snapshots[i].currentIter < curIter || (snapshots[i].currentIter === curIter && snapshots[i].action === "ITERATION_START")) {
+        if (snapshots[i].action === "ITERATION_START") { setIdx(i); return; }
+      }
+      if (snapshots[i].currentIter < curIter) {
+        for (let j = i; j >= 0; j--) {
+          if (snapshots[j].action === "ITERATION_START") { setIdx(j); return; }
+        }
+        setIdx(0); return;
+      }
+    }
+    setIdx(0);
+  };
+
+  const nextIter = () => {
+    if (!snapshot) return;
+    const curIter = snapshot.currentIter;
+    for (let i = idx + 1; i < snapshots.length; i++) {
+      if (snapshots[i].action === "ITERATION_START" && snapshots[i].currentIter > curIter) {
+        setIdx(i); return;
+      }
+    }
+    setIdx(snapshots.length - 1);
+  };
+
+  // Tree layout — recompute whenever snapshot changes
+  const positions = useMemo(() => {
+    if (!snapshot) return {};
+    return layoutTree(snapshot.nodes);
+  }, [snapshot]);
+
+  // Mouse events for pan
+  const onMouseDown = (e) => { dragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; };
+  const onMouseMove = (e) => {
+    if (!dragging.current) return;
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setTransform((t) => ({ ...t, x: t.x + dx, y: t.y + dy }));
+  };
+  const onMouseUp = () => { dragging.current = false; };
+  const onWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setTransform((t) => ({ ...t, scale: Math.max(0.2, Math.min(3, t.scale * delta)) }));
+  };
+
+  const resetView  = () => setTransform({ x: 300, y: 40, scale: 1 });
+  const zoomIn     = () => setTransform((t) => ({ ...t, scale: Math.min(3, t.scale * 1.2) }));
+  const zoomOut    = () => setTransform((t) => ({ ...t, scale: Math.max(0.2, t.scale * 0.8) }));
+
+  const phaseInfo  = snapshot ? (PHASE_COLORS[snapshot.phase] ?? PHASE_COLORS["INIT"]) : PHASE_COLORS["INIT"];
+  const fileInputRef = useRef(null);
+
+  const getEdgeState = (edge) => {
+    if (!snapshot) return { isActive: false, isBackprop: false, isBest: false, backpropValue: null };
+    const activePath        = snapshot.activePath ?? [];
+    const backpropPath      = snapshot.backpropPath ?? [];
+    const bae               = snapshot.backpropActiveEdge;
+    const decisionMove      = snapshot.decisionMove;
+    const inBackpropPhase   = snapshot.phase === "BACKPROP";
+
+    // isBackprop: this is the single edge currently being traversed upward
+    const isBackprop = bae ? (edge.from === bae.from && edge.to === bae.to) : false;
+    const edgeBpValue = isBackprop ? snapshot.backpropValue : null;
+
+    // Suppress selection-path highlight during backprop so it doesn't bleed cyan
+    const isActive = !inBackpropPhase && activePath.includes(edge.from) && activePath.includes(edge.to);
+
+    return {
+      isActive,
+      isBackprop,
+      isBest:     edge.to === decisionMove,
+      backpropValue: edgeBpValue,
+    };
+  };
+
+  const t = theme;
+
+  return (
+    <div style={{
+      width: "100vw", height: "100vh",
+      background: t.appBg,
+      display: "flex", flexDirection: "column",
+      fontFamily: "'IBM Plex Sans', sans-serif",
+      overflow: "hidden",
+      color: t.nodeText,
+      transition: "background 0.25s, color 0.25s",
+    }}>
+      {/* ── GOOGLE FONTS + ANIMATIONS ── */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+        @keyframes dashFlowDown { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -14; } }
+        @keyframes dashFlowUp   { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 14; } }
+
+        @keyframes pulseBorder  { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: ${t.scrollbarTrack}; }
+        ::-webkit-scrollbar-thumb { background: ${t.scrollbarThumb}; border-radius: 2px; }
+        button { transition: opacity 0.15s, background 0.15s; }
+        button:hover { opacity: 0.82; }
+        button:active { opacity: 0.65; }
+        body.resizing * { user-select: none !important; cursor: ns-resize !important; }
+      `}</style>
+
+      {/* ── TOP BAR ── */}
+      <div style={{
+        height: 52, minHeight: 52,
+        background: t.topBarBg,
+        borderBottom: `1px solid ${t.panelBorder}`,
+        display: "flex", alignItems: "center",
+        padding: "0 14px", gap: 10,
+        boxShadow: darkMode ? "none" : "0 1px 4px rgba(0,0,0,0.08)",
+      }}>
+        {/* Title */}
+        <div style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+          color: "#00e5ff", letterSpacing: "0.15em", fontWeight: 700,
+          marginRight: 6, whiteSpace: "nowrap",
+        }}>
+          MCTS Visualizer
+        </div>
+
+        {/* Phase badge */}
+        <div style={{
+          background: phaseInfo.bg + "dd",
+          border: `1px solid ${phaseInfo.border}`,
+          borderRadius: 20, padding: "2px 10px",
+          fontSize: 9, fontFamily: "monospace",
+          color: phaseInfo.text, letterSpacing: "0.1em",
+          backdropFilter: "blur(8px)", whiteSpace: "nowrap",
+        }}>
+          {phaseInfo.label}
+        </div>
+
+        {/* Action label */}
+        {snapshot && (
+          <div style={{ fontFamily: "monospace", fontSize: 9, color: t.labelText, whiteSpace: "nowrap" }}>
+            {snapshot.action}
+          </div>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Counters */}
+        <div style={{ fontFamily: "monospace", fontSize: 10, color: t.counterText, whiteSpace: "nowrap" }}>
+          Action <span style={{ color: t.counterVal }}>{idx + 1}</span>
+          <span style={{ color: t.labelText }}>/{snapshots.length}</span>
+          {" · Iter "}
+          <span style={{ color: t.counterVal }}>{snapshot?.currentIter ?? 0}</span>
+        </div>
+
+        <div style={{ width: 1, height: 24, background: t.divider }} />
+
+        {/* Nav buttons */}
+        {[
+          { label: "◀◀ Iter", fn: prevIter },
+          { label: "◀ Act",   fn: prevAction },
+          { label: playing ? "⏸ Pause" : "▶ Play", fn: () => setPlaying((p) => !p), accent: true },
+          { label: "Act ▶",   fn: nextAction },
+          { label: "Iter ▶▶", fn: nextIter },
+        ].map(({ label, fn, accent }) => (
+          <button key={label} onClick={fn} style={{
+            background: accent ? t.btnAccentBg : t.btnBg,
+            border: `1px solid ${accent ? t.btnAccentBorder : t.btnBorder}`,
+            borderRadius: 5, padding: "4px 9px",
+            color: accent ? t.btnAccentText : t.btnText,
+            fontFamily: "monospace", fontSize: 9.5,
+            cursor: "pointer", whiteSpace: "nowrap",
+          }}>
+            {label}
+          </button>
+        ))}
+
+        {/* Speed */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontFamily: "monospace", fontSize: 8, color: t.labelText }}>SPD</span>
+          <input type="range" min={0.5} max={4} step={0.5} value={speed}
+            onChange={(e) => setSpeed(parseFloat(e.target.value))}
+            style={{ width: 55, accentColor: "#00e5ff" }} />
+          <span style={{ fontFamily: "monospace", fontSize: 8, color: t.counterText }}>{speed}×</span>
+        </div>
+
+        <div style={{ width: 1, height: 24, background: t.divider }} />
+
+        {/* Load log */}
+        <button onClick={() => fileInputRef.current?.click()} style={{
+          background: t.btnBg, border: `1px solid ${t.btnBorder}`,
+          borderRadius: 5, padding: "4px 10px",
+          color: t.loadLogColor, fontFamily: "monospace", fontSize: 9.5,
+          cursor: "pointer", whiteSpace: "nowrap",
+        }}>
+          📂 Load Log
+        </button>
+        <input ref={fileInputRef} type="file" accept=".log,.txt" onChange={handleFile} style={{ display: "none" }} />
+
+        {/* ── DARK / LIGHT TOGGLE ── */}
+        <button
+          onClick={() => setDarkMode((d) => !d)}
+          title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          style={{
+            background: t.btnBg,
+            border: `1px solid ${t.btnBorder}`,
+            borderRadius: 20,
+            padding: "4px 12px",
+            display: "flex", alignItems: "center", gap: 6,
+            cursor: "pointer", whiteSpace: "nowrap",
+            fontFamily: "'IBM Plex Sans', sans-serif",
+            fontSize: 11,
+            color: t.btnText,
+            boxShadow: darkMode ? "none" : "0 1px 3px rgba(0,0,0,0.1)",
+          }}>
+          {/* Toggle track */}
+          <div style={{
+            width: 32, height: 17,
+            background: darkMode ? "#1e3050" : "#bfdbfe",
+            borderRadius: 9,
+            position: "relative",
+            transition: "background 0.25s",
+            flexShrink: 0,
+          }}>
+            <div style={{
+              position: "absolute",
+              top: 2, left: darkMode ? 2 : 15,
+              width: 13, height: 13,
+              borderRadius: "50%",
+              background: darkMode ? "#00e5ff" : "#2563eb",
+              transition: "left 0.2s",
+              boxShadow: darkMode ? "0 0 6px rgba(0,229,255,0.6)" : "none",
+            }} />
+          </div>
+          <span style={{ fontSize: 13 }}>{darkMode ? "🌙" : "☀️"}</span>
+        </button>
+      </div>
+
+      {/* ── MAIN AREA ── */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+        {/* LEFT: Board panel */}
+        <BoardPanel snapshot={snapshot} theme={t} />
+
+        {/* CENTER: Tree panel */}
+        <div
+          style={{ flex: 1, position: "relative", overflow: "hidden", background: t.treeBg }}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseUp}
+          onWheel={onWheel}
+        >
+          {/* Subtle dot-grid background */}
+          <div style={{
+            position: "absolute", inset: 0, pointerEvents: "none",
+            backgroundImage: `radial-gradient(circle, ${t.treeGridLine} 1px, transparent 1px)`,
+            backgroundSize: "28px 28px",
+            opacity: darkMode ? 0.5 : 0.6,
+          }} />
+
+          {!loaded && (
+            <div style={{
+              position: "absolute", inset: 0, display: "flex",
+              alignItems: "center", justifyContent: "center",
+              color: t.nodeLabel, fontFamily: "monospace", fontSize: 14,
+            }}>
+              Loading demo…
+            </div>
+          )}
+
+          <svg ref={svgRef} width="100%" height="100%"
+            style={{ cursor: dragging.current ? "grabbing" : "grab" }}>
+            <defs>
+              <filter id="glow-cyan">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+            <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
+              {/* Edges first (under nodes) */}
+              {snapshot && snapshot.edges.map((edge, i) => {
+                const fp = positions[edge.from];
+                const tp = positions[edge.to];
+                if (!fp || !tp) return null;
+                const { isActive, isBackprop, isBest, backpropValue: edgeBpVal } = getEdgeState(edge);
+                const childQ = snapshot.nodes[edge.to]?.q ?? 0;
+                return (
+                  <TreeEdge key={i} fromPos={fp} toPos={tp} edge={edge}
+                    childQ={childQ}
+                    isActive={isActive} isBackprop={isBackprop} isBest={isBest}
+                    backpropValue={edgeBpVal} theme={t} />
+                );
+              })}
+
+              {/* Nodes */}
+              {snapshot && Object.values(snapshot.nodes).map((node) => {
+                const pos = positions[node.id];
+                if (!pos) return null;
+                const puctScore = snapshot.puctScores[node.id] ?? null;
+                const isActiveBackprop = snapshot.backpropPath.includes(node.id);
+                return (
+                  <TreeNode key={node.id} node={node} pos={pos}
+                    puctScore={puctScore}
+                    isActiveBackprop={isActiveBackprop}
+                    backpropValue={isActiveBackprop ? snapshot.backpropValue : null}
+                    theme={t}
+                  />
+                );
+              })}
+            </g>
+          </svg>
+
+          {/* Legend */}
+          <div style={{
+            position: "absolute", bottom: 16, right: 56,
+            background: t.panelBg,
+            border: `1px solid ${t.panelBorder}`,
+            borderRadius: 8,
+            padding: "8px 12px",
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 9,
+            color: t.nodeSubText,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
+            display: "flex", flexDirection: "column", gap: 5,
+            minWidth: 160,
+            zIndex: 10,
+          }}>
+            <div style={{ fontWeight: "bold", fontSize: 8, letterSpacing: "0.12em", color: t.nodeLabel, textTransform: "uppercase", marginBottom: 2 }}>Legend</div>
+            {[
+              { color: "#1e40af", label: "Expanded (visited)" },
+              { color: "#94a3b8", label: "Not visited", opacity: 0.45 },
+              { color: "#f43f5e", label: "Backpropagation" },
+              { color: "#00e5ff", label: "Active path" },
+              { color: "#10b981", label: "🏆 Terminal state" },
+            ].map(({ color, label, opacity }) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <div style={{
+                  width: 12, height: 12, borderRadius: 3, flexShrink: 0,
+                  border: `2px solid ${color}`,
+                  background: "transparent",
+                  opacity: opacity ?? 1,
+                }}/>
+                <span style={{ opacity: opacity ?? 1 }}>{label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Zoom controls */}
+          <div style={{ position: "absolute", bottom: 16, right: 16, display: "flex", flexDirection: "column", gap: 4 }}>
+            {[{ label: "⊕", fn: zoomIn }, { label: "⊖", fn: zoomOut }, { label: "⌖", fn: resetView }].map(({ label, fn }) => (
+              <button key={label} onClick={fn} style={{
+                width: 32, height: 32,
+                background: t.zoomBtnBg,
+                border: `1px solid ${t.zoomBtnBorder}`,
+                borderRadius: 6, color: t.zoomBtnText,
+                fontSize: 14, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Iteration label */}
+          <div style={{
+            position: "absolute", top: 10, left: 12,
+            fontFamily: "monospace", fontSize: 9, color: t.iterLabel,
+          }}>
+            iteration {snapshot?.currentIter ?? 0}
+          </div>
+        </div>
+      </div>
+
+      {/* ── MATH PANEL ── */}
+      <MathPanel snapshot={snapshot} theme={t} height={mathPanelHeight} onResizeStart={onResizeStart} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MCTSVisualizer));
+
+})();
+</script>
+</body>
+</html>

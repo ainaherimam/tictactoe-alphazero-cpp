@@ -109,7 +109,7 @@ void selfplay_worker(int worker_id,
 
     for (int game_num = 0; game_num < games_per_worker; ++game_num) {
 
-        Mcts_config config(1.4, 100, LogLevel::NONE, 0.0, 0.3, 0.25, queue, -1, false, 0);
+        Mcts_config config(1.4, 100, LogLevel::NONE, 0.0, 0.3, 0.25, queue, 10, false, 1);
         
         auto player1 = std::make_unique<Mcts_player_selfplay>(config);
         auto player2 = std::make_unique<Mcts_player_selfplay>(config);

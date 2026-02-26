@@ -25,10 +25,10 @@ if(DEFINED ENV{TRITON_CLIENT_DIR})
     set(TRITON_CLIENT_DIR $ENV{TRITON_CLIENT_DIR})
     message(STATUS "Using Triton from environment: ${TRITON_CLIENT_DIR}")
 elseif(EXISTS "${CMAKE_SOURCE_DIR}/triton_client")
-    set(TRITON_CLIENT_DIR "${CMAKE_SOURCE_DIR}/triton_client")
+    set(TRITON_CLIENT_DIR "/home/aina/tictactoe-alphazero-cpp/triton_client")
     message(STATUS "Using local Triton installation: ${TRITON_CLIENT_DIR}")
 elseif(EXISTS "$ENV{HOME}/triton_client")
-    set(TRITON_CLIENT_DIR "$ENV{HOME}/triton_client")
+    set(TRITON_CLIENT_DIR "/home/aina/tictactoe-alphazero-cpp/triton_client")
     message(STATUS "Using Triton from home directory: ${TRITON_CLIENT_DIR}")
 else()
     message(WARNING "Triton client directory not found. Set TRITON_CLIENT_DIR or place triton_client/ in the project root.")
@@ -125,23 +125,15 @@ add_executable(AlphaZero_TTT
     executables/main.cpp
 )
 
-add_executable(AZ_Triton_TTT
-    executables/main_triton.cpp
-)
 
 add_executable(AlphaZero_TTT_Eval
     executables/eval.cpp
 )
 
-add_executable(AZ_Triton_TTT_Eval
-    executables/eval_triton.cpp
-)
-
 
 target_link_libraries(AlphaZero_TTT PRIVATE az_core)
-target_link_libraries(AZ_Triton_TTT PRIVATE az_core)
 target_link_libraries(AlphaZero_TTT_Eval PRIVATE az_core)
-target_link_libraries(AZ_Triton_TTT_Eval PRIVATE az_core)
+
 
 # ============================================================
 # === Compiler Flags ========================================
@@ -164,8 +156,6 @@ endif()
 foreach(target
     AlphaZero_TTT
     AlphaZero_TTT_Eval
-    AZ_Triton_TTT
-    AZ_Triton_TTT_Eval
 )
     set_property(TARGET ${target}
         PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE
@@ -179,8 +169,6 @@ endforeach()
 install(TARGETS
     AlphaZero_TTT
     AlphaZero_TTT_Eval
-    AZ_Triton_TTT
-    AZ_Triton_TTT_Eval
 )
 
 # ============================================================

@@ -288,6 +288,7 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, Board> Mcts_agent_selfplay
     const std::shared_ptr<Node>& parent_node, Board board) {
     std::shared_ptr<Node> current = parent_node;
     Cell_state current_player = current->player;
+    int depth = 0;
 
     while (current->expanded && !current->child_nodes.empty() && depth < max_depth) {
         // Pick best child

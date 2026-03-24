@@ -127,19 +127,18 @@ void selfplay_worker(int worker_id,
 
 int main(int argc, char** argv) {
 
-    const size_t MAX_CAPACITY  = 50000;
+    const size_t MAX_CAPACITY  = 75000;
     const int    NUM_WORKERS   = 4;
     const int    GAMES_PER_WORKER = 2500;
 
     // Archive any leftover checkpoint folders / trigger files from previous runs.
-    archive_checkpoints("checkpoints/");
+    // archive_checkpoints("checkpoints/");
 
     std::string session_dir = get_session_dir();
     
     auto shm_writer  = std::make_shared<TrainingShmWriter>(MAX_CAPACITY);
     auto queue      = std::make_shared<SharedMemoryInferenceQueue>("/mcts_jax_inference");
     auto game_logger = std::make_shared<GameLogger>(session_dir);
-
 
     std::cout << "Waiting for best model server...\n";
     if (!queue->wait_for_server(30000)) {
@@ -163,6 +162,7 @@ int main(int argc, char** argv) {
     std::cout << "  Positions:     " << shm_writer->current_size()   << "\n";
 
     std::this_thread::sleep_for(std::chrono::seconds(60));
+    shm_writer->dump_to_disk();
     shm_writer->shutdown();
     return 0;
 }

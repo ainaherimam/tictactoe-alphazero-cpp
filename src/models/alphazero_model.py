@@ -100,12 +100,10 @@ class TrainStateWithBatchStats(train_state.TrainState):
 def alphazero_loss(params, state, batch):
     """
     Compute AlphaZero loss: cross-entropy(policy) + MSE(value).
-    
     Args:
         params: Model parameters
         state: Training state
         batch: Dict with keys 'boards', 'pi', 'z', 'mask'
-    
     Returns:
         (total_loss, (metrics_dict, new_batch_stats))
     """
@@ -113,36 +111,57 @@ def alphazero_loss(params, state, batch):
     pi_target = batch['pi']   # [B, 16]
     z_target = batch['z']     # [B]
     mask = batch['mask']      # [B, 16]
-    
+
     # Forward pass
     (p_pred, v_pred), updates = state.apply_fn(
         {'params': params, 'batch_stats': state.batch_stats},
-        boards, 
+        boards,
         mask,
         training=True,
         mutable=['batch_stats']
     )
-    
+
     # Policy loss: cross-entropy with target distribution
     policy_loss = -jnp.sum(pi_target * p_pred, axis=-1).mean()
-    
+
     # Value loss: MSE
     value_loss = jnp.mean((v_pred - z_target) ** 2)
-    
+
     # Total loss
     total_loss = policy_loss + value_loss
-    
+
+    # Policy accuracy metrics
+    top1_target = jnp.argmax(pi_target, axis=-1)         
+    top1_pred   = jnp.argmax(p_pred,   axis=-1)      
+
+    # Top-k indices of predicted logits (ascending, so slice from the end)
+    top3_pred_indices = jnp.argsort(p_pred, axis=-1)[:, -3:]   
+    top2_pred_indices = top3_pred_indices[:, -2:]              
+
+    # Check whether the greedy target action appears within top-k predictions
+    policy_top1_acc = jnp.mean(top1_pred == top1_target)
+
+    policy_top2_acc = jnp.mean(
+        jnp.any(top2_pred_indices == top1_target[:, None], axis=-1)
+    )
+
+    policy_top3_acc = jnp.mean(
+        jnp.any(top3_pred_indices == top1_target[:, None], axis=-1)
+    )
+
     # Metrics
     metrics = {
         'loss': total_loss,
         'policy_loss': policy_loss,
         'value_loss': value_loss,
         'policy_entropy': -jnp.sum(jnp.exp(p_pred) * p_pred, axis=-1).mean(),
-        'value_accuracy': jnp.mean(jnp.abs(v_pred - z_target) < 0.2),
+        'value_accuracy': jnp.mean(jnp.abs(v_pred - z_target) < 0.05),
+        'policy_top1_acc': policy_top1_acc,   # pred top-1 == target top-1
+        'policy_top2_acc': policy_top2_acc,   # target top-1 in pred top-2
+        'policy_top3_acc': policy_top3_acc,   # target top-1 in pred top-3
     }
-    
-    return total_loss, (metrics, updates['batch_stats'])
 
+    return total_loss, (metrics, updates['batch_stats'])
 
 # ============================================================================
 # TRAINING STEP (JIT-COMPILED)

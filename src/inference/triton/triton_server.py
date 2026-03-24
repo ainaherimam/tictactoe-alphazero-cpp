@@ -294,7 +294,7 @@ def main():
         description="PyTriton AlphaZero Inference Server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument('--checkpoint',      type=str, default='checkpoints/checkpoint_5100', help='Path to model checkpoint')
+    parser.add_argument('--checkpoint',      type=str, default='checkpoints/best', help='Path to model checkpoint')
     parser.add_argument('--watch-dir',       type=str, default=None,  help='Directory to watch for reload triggers (default: checkpoint dir)')
     parser.add_argument('--num-channels',    type=int, default=64,    help='Model channels')
     parser.add_argument('--num-res-blocks',  type=int, default=3,     help='Model residual blocks')

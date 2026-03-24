@@ -1,96 +1,93 @@
 #pragma once
 
+// TrainingPosition, TrainingBufferHeader, training_segment_size(),
+// and training_positions_ptr() are all defined in the protocol header.
+// This is the single source of truth — do NOT redefine them here.
 #include "training/training_shm_protocol.h"
-#include "core/mcts/position_pool.h"
-#include <string>
-#include <mutex>
-#include <memory>
 
-/**
- * @class TrainingShmWriter
- * @brief Manages writing training data to shared memory for Python consumer.
- * 
- * This class wraps the /az_training shared memory segment. C++ self-play workers
- * call flush_game() to write completed games to a ring buffer that can be consumed
- * by a Python training process.
- * 
- * Thread-safe: Multiple workers can flush games concurrently using internal mutex.
- * 
- */
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <string>
+
+// Forward declarations — full definitions pulled in by training_shm_writer.cpp
+class PositionPool;   // core/mcts/position_pool.h
+struct Position;      // core/game/position.h
+
+// ============================================================================
+//  TrainingShmWriter
+// ============================================================================
+
+/// Creates and owns a POSIX shared-memory segment that the Python training
+/// script consumes via TrainingShmReader.
+///
+/// On construction the writer tries to reload any positions that were
+/// previously saved to "data/last_data.bin"; if the file does not exist the
+/// buffer starts empty.  Call dump_to_disk() to atomically overwrite that
+/// same file so the next run can resume immediately.
 class TrainingShmWriter {
 public:
-    /**
-     * @brief Constructs the writer and creates the shared memory segment.
-     * @param max_capacity Ring buffer capacity in positions (default: 20,000)
-     * @param segment_name Shared memory segment name (default: "/az_training")
-     * @throws std::runtime_error if segment creation, sizing, or mapping fails
-     */
-    explicit TrainingShmWriter(size_t max_capacity = 20000,
+    /// @param max_capacity   Ring-buffer capacity (number of TrainingPositions)
+    /// @param segment_name   POSIX SHM name, e.g. "/az_training"
+    explicit TrainingShmWriter(size_t             max_capacity,
                                const std::string& segment_name = "/az_training");
-    
-    /**
-     * @brief Destructor - unmaps and unlinks the shared memory segment.
-     */
+
     ~TrainingShmWriter();
-    
-    /**
-     * @brief Flushes a completed game to shared memory.
-     * @param pool Position pool containing the game data with finalized z-values
-     * 
-     * Thread-safe: Uses internal mutex protection.
-     * This should be called after PositionPool::finalize_game() has assigned outcomes.
-     */
+
+    // Non-copyable, non-movable (owns a raw SHM file descriptor + mmap).
+    TrainingShmWriter(const TrainingShmWriter&)            = delete;
+    TrainingShmWriter& operator=(const TrainingShmWriter&) = delete;
+    TrainingShmWriter(TrainingShmWriter&&)                 = delete;
+    TrainingShmWriter& operator=(TrainingShmWriter&&)      = delete;
+
+    // ── Write path ──────────────────────────────────────────────────────────
+
+    /// Copy all positions in @p pool into the ring buffer and bump the
+    /// generation counter so the Python reader knows fresh data arrived.
+    /// Thread-safe: acquires write_mutex_ internally.
     void flush_game(const PositionPool& pool);
-    
-    /**
-     * @brief Gets the buffer capacity.
-     * @return Maximum number of positions the buffer can hold
-     */
-    size_t max_capacity() const {
-        return max_capacity_;
-    }
-    
-    /**
-     * @brief Signals shutdown to the Python training process.
-     */
-    void shutdown();
-    
-    /**
-     * @brief Checks if shutdown has been requested.
-     * @return true if shutdown signal is set
-     */
-    bool is_shutdown() const;
-    
-    /**
-     * @brief Gets the current generation counter.
-     * @return Number of games flushed to the buffer
-     */
-    uint64_t generation() const;
-    
-    /**
-     * @brief Gets the current number of positions in the buffer.
-     * @return Current buffer size (capped at max_capacity)
-     */
-    uint32_t current_size() const;
-    
-    /**
-     * @brief Gets the current write index in the ring buffer.
-     * @return Index where next write will occur
-     */
-    uint32_t write_index() const;
+
+    // ── Persistence ─────────────────────────────────────────────────────────
+
+    /// Snapshot the current ring-buffer contents to "data/last_data.bin".
+    /// Thread-safe: acquires write_mutex_ internally.
+    void dump_to_disk();
+
+    // ── Queries ─────────────────────────────────────────────────────────────
+
+    /// Ring-buffer capacity (number of TrainingPositions).
+    size_t   max_capacity()  const { return max_capacity_; }
+
+    // ── Control signals ─────────────────────────────────────────────────────
+
+    void     shutdown();
+    bool     is_shutdown()   const;
+    uint64_t generation()    const;
+    uint32_t current_size()  const;
+    uint32_t write_index()   const;
 
 private:
-    TrainingShmWriter(const TrainingShmWriter&) = delete;
-    TrainingShmWriter& operator=(const TrainingShmWriter&) = delete;
-    
-    std::string segment_name_;          ///< Shared memory segment name
-    size_t max_capacity_;               ///< Maximum buffer capacity in positions
-    int shm_fd_;                        ///< Shared memory file descriptor
-    void* shm_base_;                    ///< Base pointer to mapped memory
-    size_t shm_size_;                   ///< Total size of shared memory segment
-    
-    TrainingBufferHeader* header_;      ///< Pointer to buffer header
-    TrainingPosition* positions_;       ///< Pointer to positions array
-    
-    std::mutex write_mutex_;            ///< Mutex protecting concurrent writes
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /// Called once from the constructor: reads "data/last_data.bin" and, if
+    /// the file exists and is valid, pre-populates the ring buffer with its
+    /// contents.  Errors are non-fatal; the writer simply starts empty.
+    void load_from_disk();
+
+    /// Writes the ring-buffer snapshot to "data/last_data.bin".
+    /// Caller MUST hold write_mutex_.
+    void dump_to_disk_locked();
+
+    // ── Data members ────────────────────────────────────────────────────────
+
+    std::string           segment_name_;
+    size_t                max_capacity_;
+    size_t                shm_size_;
+
+    int                   shm_fd_;
+    void*                 shm_base_;
+    TrainingBufferHeader* header_;
+    TrainingPosition*     positions_;
+
+    std::mutex            write_mutex_;
 };

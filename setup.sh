@@ -219,7 +219,7 @@ if [ "$SKIP_VENV" = false ]; then
     echo "→ Detected Python version: $python_version"
 
     # Check if Python version is 3.11 or 3.12
-    if [ "$major_version" -ne 3 ] || [ "$minor_version" -lt 11 ] || [ "$minor_version" -gt 12 ]; then
+    if [ "$major_version" -ne 3 ] || [ "$minor_version" -lt 11 ] || [ "$minor_version" -gt 13 ]; then
         echo ""
         echo "✗ Error: Python version must be 3.11 or 3.12"
         echo "  Current version: $python_version"

@@ -38,6 +38,7 @@ from src.models.alphazero_model import (
     save_checkpoint,
     load_checkpoint,
 )
+from src.constants import BOARD_HEIGHT, BOARD_WIDTH
 
 
 # ============================================================================
@@ -57,6 +58,45 @@ def signal_handler(signum, frame):
     else:
         print("\n[Training] ⚠️  Force quit!")
         sys.exit(1)
+
+
+# ============================================================================
+# DATA AUGMENTATION (8 symmetries of the square board)
+# ============================================================================
+
+def augment_batch(batch_dict: dict, rng: np.random.Generator) -> dict:
+    """Apply a random symmetry transform (rotation + optional flip) per sample.
+
+    A square board has 8 symmetries: 4 rotations × {identity, horizontal flip}.
+    Each sample in the batch gets a randomly chosen transform applied to
+    boards, pi, and mask.  Value z is invariant under spatial transforms.
+    """
+    B = batch_dict['boards'].shape[0]
+    sym_indices = rng.integers(0, 8, size=B)
+
+    boards = batch_dict['boards'].copy()                                    # [B, 3, H, W]
+    pi     = batch_dict['pi'].reshape(B, BOARD_HEIGHT, BOARD_WIDTH).copy()  # [B, H, W]
+    mask   = batch_dict['mask'].reshape(B, BOARD_HEIGHT, BOARD_WIDTH).copy()
+
+    for i in range(B):
+        k    = int(sym_indices[i] % 4)
+        flip = sym_indices[i] >= 4
+
+        if flip:
+            boards[i] = np.flip(boards[i], axis=-1)
+            pi[i]     = np.flip(pi[i], axis=-1)
+            mask[i]   = np.flip(mask[i], axis=-1)
+        if k > 0:
+            boards[i] = np.rot90(boards[i], k=k, axes=(-2, -1))
+            pi[i]     = np.rot90(pi[i], k=k, axes=(-2, -1))
+            mask[i]   = np.rot90(mask[i], k=k, axes=(-2, -1))
+
+    return {
+        'boards': np.ascontiguousarray(boards),
+        'pi':     np.ascontiguousarray(pi.reshape(B, -1)),
+        'z':      batch_dict['z'],
+        'mask':   np.ascontiguousarray(mask.reshape(B, -1)),
+    }
 
 
 # ============================================================================
@@ -194,6 +234,7 @@ def train(
                     step_start = time.time()
 
                     batch_dict = reader.sample_batch(config.batch_size, rng=rng_np)
+                    batch_dict = augment_batch(batch_dict, rng_np)
 
                     batch = {
                         "boards": jnp.array(batch_dict["boards"]),

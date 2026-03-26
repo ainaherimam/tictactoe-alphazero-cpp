@@ -84,7 +84,8 @@ public:
     /**
      * @brief Converts the board state to a float array for data collection.
      * @param player The current player
-     * @param output Pointer to pre-allocated float array of size [3 * 4 * 4]
+     * @param output Pointer to pre-allocated float array of size [INPUT_SIZE]
+     *               (= INPUT_PLANES * BOARD_HEIGHT * BOARD_WIDTH)
      *               Plane 0: Current player's pieces
      *               Plane 1: Opponent's pieces
      *               Plane 2: Current player indicator (0 for X, 1 for O)
@@ -100,8 +101,8 @@ public:
     /**
      * @brief Generates a legal move mask for data collection.
      * @param player The player to generate the mask for
-     * @param output Pointer to pre-allocated float array of size [4 * 4 * 1 * 1]
-     *               1.0 indicates a legal move, 0.0 indicates illegal
+     * @param output Pointer to pre-allocated float array of size [POLICY_SIZE]
+     *               (= BOARD_CELLS) 1.0 indicates a legal move, 0.0 indicates illegal
      */
     void get_legal_mask(Cell_state player, float* output) const;
     

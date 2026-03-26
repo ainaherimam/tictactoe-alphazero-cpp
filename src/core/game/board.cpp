@@ -7,9 +7,9 @@
 
 
 Board::Board(int board_size)
-    : board_size(board_size), 
+    : board_size(board_size),
       empty_board(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty)),
-    history(board_size, std::vector<std::vector<Cell_state>>(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty))),
+    history(HISTORY_LENGTH, std::vector<std::vector<Cell_state>>(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty))),
     board(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty)) {
 
         // board[0][0] = Cell_state::X;
@@ -28,7 +28,7 @@ bool Board::is_within_bounds(Move move) const {
 
 
 void Board::add_history() {
-    if (history.size() == 4) {
+    if (history.size() == HISTORY_LENGTH) {
         history.erase(history.begin());
     }
     history.push_back(board);
@@ -82,9 +82,9 @@ void Board::to_float_array(Cell_state player, float* output) const {
     
     for (int x = 0; x < board_size; ++x) {
         for (int y = 0; y < board_size; ++y) {
-            int plane0_idx = 0 * 16 + x * 4 + y;
-            int plane1_idx = 1 * 16 + x * 4 + y;
-            int plane2_idx = 2 * 16 + x * 4 + y;
+            int plane0_idx = 0 * BOARD_CELLS + x * BOARD_WIDTH + y;
+            int plane1_idx = 1 * BOARD_CELLS + x * BOARD_WIDTH + y;
+            int plane2_idx = 2 * BOARD_CELLS + x * BOARD_WIDTH + y;
             
             // Plane 0: Current player's pieces
             if (board[x][y] == player) {
@@ -109,9 +109,9 @@ Cell_state Board::check_winner() const {
         return Cell_state::Empty;
     };
 
-    // Check horizontal 3-in-a-rows
-    for (int i = 0; i < 4; ++i) {
-        for (int j = 0; j < 2; ++j) {
+    // Check horizontal WIN_LENGTH-in-a-rows
+    for (int i = 0; i < BOARD_HEIGHT; ++i) {
+        for (int j = 0; j <= BOARD_WIDTH - WIN_LENGTH; ++j) {
             if (board[i][j] != Cell_state::Empty &&
                 board[i][j] == board[i][j+1] &&
                 board[i][j+1] == board[i][j+2]) {
@@ -120,9 +120,9 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    // Check vertical 3-in-a-rows
-    for (int j = 0; j < 4; ++j) {
-        for (int i = 0; i < 2; ++i) {
+    // Check vertical WIN_LENGTH-in-a-rows
+    for (int j = 0; j < BOARD_WIDTH; ++j) {
+        for (int i = 0; i <= BOARD_HEIGHT - WIN_LENGTH; ++i) {
             if (board[i][j] != Cell_state::Empty &&
                 board[i][j] == board[i+1][j] &&
                 board[i+1][j] == board[i+2][j]) {
@@ -131,9 +131,9 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    // Check diagonal 3-in-a-rows
-    for (int i = 0; i < 2; ++i) {
-        for (int j = 0; j < 2; ++j) {
+    // Check diagonal WIN_LENGTH-in-a-rows
+    for (int i = 0; i <= BOARD_HEIGHT - WIN_LENGTH; ++i) {
+        for (int j = 0; j <= BOARD_WIDTH - WIN_LENGTH; ++j) {
             if (board[i][j] != Cell_state::Empty &&
                 board[i][j] == board[i+1][j+1] &&
                 board[i+1][j+1] == board[i+2][j+2]) {
@@ -142,9 +142,9 @@ Cell_state Board::check_winner() const {
         }
     }
     
-    // Check anti-diagonal 3-in-a-rows
-    for (int i = 0; i < 2; ++i) {
-        for (int j = 2; j < 4; ++j) {
+    // Check anti-diagonal WIN_LENGTH-in-a-rows
+    for (int i = 0; i <= BOARD_HEIGHT - WIN_LENGTH; ++i) {
+        for (int j = WIN_LENGTH - 1; j < BOARD_WIDTH; ++j) {
             if (board[i][j] != Cell_state::Empty &&
                 board[i][j] == board[i+1][j-1] &&
                 board[i+1][j-1] == board[i+2][j-2]) {
@@ -197,7 +197,12 @@ void Board::display_board(std::ostream& os) const {
         os << "\n";
 
         if (r < Y_ - 1) {
-            os << "   ───┼───┼───┼───\n";
+            os << "   ";
+            for (int c = 0; c < Y_; ++c) {
+                os << "───";
+                if (c < Y_ - 1) os << "┼";
+            }
+            os << "\n";
         }
     }
     std::cout << "\n";

@@ -14,16 +14,26 @@
 // Python JAX training process reads random samples.
 //
 // Segment name: /az_training
-// Layout: [64-byte header] [N × 384-byte positions]
+// Layout: [64-byte header] [N × TRAINING_POSITION_BYTES positions]
 // ============================================================================
 
 // ============================================================================
 // CONFIGURATION CONSTANTS (must match Python exactly)
 // ============================================================================
 
-constexpr size_t TRAINING_BOARD_SIZE = INPUT_SIZE;      // 48 floats (3×4×4)
-constexpr size_t TRAINING_POLICY_SIZE = POLICY_SIZE;    // 16 floats
-constexpr size_t TRAINING_POSITION_BYTES = 384;         // Total position size
+constexpr size_t TRAINING_BOARD_SIZE  = INPUT_SIZE;    // INPUT_PLANES * BOARD_HEIGHT * BOARD_WIDTH floats
+constexpr size_t TRAINING_POLICY_SIZE = POLICY_SIZE;   // BOARD_CELLS floats
+
+// Derived: total data bytes in one TrainingPosition (board + pi + z + mask).
+constexpr size_t TRAINING_POSITION_DATA_BYTES =
+    TRAINING_BOARD_SIZE  * sizeof(float) +  // board
+    TRAINING_POLICY_SIZE * sizeof(float) +  // pi
+    sizeof(float)                        +  // z
+    TRAINING_POLICY_SIZE * sizeof(float);   // mask
+
+// Round up to the next 64-byte cache-line boundary.
+constexpr size_t TRAINING_POSITION_BYTES   = ((TRAINING_POSITION_DATA_BYTES + 63) / 64) * 64;
+constexpr size_t TRAINING_POSITION_PADDING = TRAINING_POSITION_BYTES - TRAINING_POSITION_DATA_BYTES;
 
 // ============================================================================
 // TRAINING POSITION STRUCTURE (384 bytes, cache-line aligned)
@@ -42,22 +52,22 @@ struct TrainingPosition {
     // Legal move mask: [16] float array (1.0 = legal, 0.0 = illegal)
     float mask[TRAINING_POLICY_SIZE];          // 64 bytes at offset 260
     
-    // Padding to reach 384 bytes (cache-line alignment)
-    uint8_t _padding[60];                      // 60 bytes at offset 324
-    
-    // Total: 192 + 64 + 4 + 64 + 60 = 384 bytes
+    // Padding to reach TRAINING_POSITION_BYTES (cache-line alignment)
+    uint8_t _padding[TRAINING_POSITION_PADDING]; // TRAINING_POSITION_BYTES - TRAINING_POSITION_DATA_BYTES
+
+    // Total: TRAINING_POSITION_BYTES (derived from TRAINING_BOARD_SIZE + TRAINING_POLICY_SIZE)
 } __attribute__((aligned(64)));
 
 static_assert(sizeof(TrainingPosition) == TRAINING_POSITION_BYTES, 
               "TrainingPosition must be 384 bytes");
-static_assert(offsetof(TrainingPosition, board) == 0, 
+static_assert(offsetof(TrainingPosition, board) == 0,
               "board must be at offset 0");
-static_assert(offsetof(TrainingPosition, pi) == 192, 
-              "pi must be at offset 192");
-static_assert(offsetof(TrainingPosition, z) == 256, 
-              "z must be at offset 256");
-static_assert(offsetof(TrainingPosition, mask) == 260, 
-              "mask must be at offset 260");
+static_assert(offsetof(TrainingPosition, pi) == TRAINING_BOARD_SIZE * sizeof(float),
+              "pi must immediately follow board");
+static_assert(offsetof(TrainingPosition, z) == (TRAINING_BOARD_SIZE + TRAINING_POLICY_SIZE) * sizeof(float),
+              "z must immediately follow pi");
+static_assert(offsetof(TrainingPosition, mask) == (TRAINING_BOARD_SIZE + TRAINING_POLICY_SIZE) * sizeof(float) + sizeof(float),
+              "mask must immediately follow z");
 
 // ============================================================================
 // TRAINING BUFFER HEADER (64 bytes, one cache line)

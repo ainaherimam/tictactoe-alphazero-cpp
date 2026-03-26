@@ -5,28 +5,33 @@ Mirrors the C++ training_shm_protocol.h structs using ctypes.
 Provides verification and NumPy view creation.
 
 Segment: /az_training
-Layout: [64-byte header][N × 384-byte positions]
+Layout: [64-byte header][N × TRAINING_POSITION_BYTES positions]
 """
 
 import ctypes
 import numpy as np
 from typing import Dict, Tuple
 
+from src.constants import INPUT_SIZE, POLICY_SIZE, INPUT_PLANES, BOARD_HEIGHT, BOARD_WIDTH
+
 # ============================================================================
 # CONSTANTS (must match C++ exactly)
 # ============================================================================
 
-TRAINING_BOARD_SIZE = 48      # INPUT_SIZE  = INPUT_PLANES(3) × BOARD_HEIGHT(4) × BOARD_WIDTH(4)
-TRAINING_POLICY_SIZE = 16     # POLICY_SIZE = BOARD_CELLS = 4 × 4
+TRAINING_BOARD_SIZE  = INPUT_SIZE    # INPUT_PLANES × BOARD_HEIGHT × BOARD_WIDTH floats
+TRAINING_POLICY_SIZE = POLICY_SIZE   # BOARD_CELLS floats
 
-# C++ layout (training_shm_protocol.h):
-#   float board[48]       = 192 bytes @ offset   0
-#   float pi[16]          =  64 bytes @ offset 192
-#   float z               =   4 bytes @ offset 256
-#   float mask[16]        =  64 bytes @ offset 260
-#   uint8_t _padding[60]  =  60 bytes @ offset 324  ← cache-line alignment to 384
-# Total: 384 bytes, __attribute__((aligned(64)))
-TRAINING_POSITION_BYTES = 384
+# Derived: total data bytes in one TrainingPosition (board + pi + z + mask).
+_TRAINING_DATA_BYTES     = (TRAINING_BOARD_SIZE + TRAINING_POLICY_SIZE) * 4 + 4 + TRAINING_POLICY_SIZE * 4
+# Round up to the next 64-byte cache-line boundary.
+TRAINING_POSITION_BYTES  = ((_TRAINING_DATA_BYTES + 63) // 64) * 64
+_TRAINING_POSITION_PAD   = TRAINING_POSITION_BYTES - _TRAINING_DATA_BYTES
+
+# Field byte offsets (used for NumPy view strides and verification).
+_OFFSET_BOARD = 0
+_OFFSET_PI    = TRAINING_BOARD_SIZE * 4
+_OFFSET_Z     = _OFFSET_PI + TRAINING_POLICY_SIZE * 4
+_OFFSET_MASK  = _OFFSET_Z + 4
 
 # ============================================================================
 # CTYPES STRUCTURES
@@ -34,21 +39,21 @@ TRAINING_POSITION_BYTES = 384
 
 class TrainingPosition(ctypes.Structure):
     """
-    Maps to C++ TrainingPosition struct (384 bytes, cache-line aligned).
+    Maps to C++ TrainingPosition struct (TRAINING_POSITION_BYTES, cache-line aligned).
 
     Matches training_shm_protocol.h exactly:
-        float board[48]      192 bytes  @ offset   0
-        float pi[16]          64 bytes  @ offset 192
-        float z                4 bytes  @ offset 256
-        float mask[16]        64 bytes  @ offset 260
-        uint8_t _padding[60]  60 bytes  @ offset 324  ← pads to 384 / cache line
+        float board[TRAINING_BOARD_SIZE]    TRAINING_BOARD_SIZE*4 bytes  @ offset _OFFSET_BOARD
+        float pi[TRAINING_POLICY_SIZE]      TRAINING_POLICY_SIZE*4 bytes @ offset _OFFSET_PI
+        float z                             4 bytes                       @ offset _OFFSET_Z
+        float mask[TRAINING_POLICY_SIZE]    TRAINING_POLICY_SIZE*4 bytes @ offset _OFFSET_MASK
+        uint8_t _padding[_TRAINING_POSITION_PAD]                          ← pads to cache line
     """
     _fields_ = [
-        ("board",    ctypes.c_float * TRAINING_BOARD_SIZE),   # 192 bytes @ offset   0
-        ("pi",       ctypes.c_float * TRAINING_POLICY_SIZE),  #  64 bytes @ offset 192
-        ("z",        ctypes.c_float),                          #   4 bytes @ offset 256
-        ("mask",     ctypes.c_float * TRAINING_POLICY_SIZE),  #  64 bytes @ offset 260
-        ("_padding", ctypes.c_uint8 * 60),                    #  60 bytes @ offset 324
+        ("board",    ctypes.c_float * TRAINING_BOARD_SIZE),              # @ offset _OFFSET_BOARD
+        ("pi",       ctypes.c_float * TRAINING_POLICY_SIZE),             # @ offset _OFFSET_PI
+        ("z",        ctypes.c_float),                                     # @ offset _OFFSET_Z
+        ("mask",     ctypes.c_float * TRAINING_POLICY_SIZE),             # @ offset _OFFSET_MASK
+        ("_padding", ctypes.c_uint8 * _TRAINING_POSITION_PAD),           # padding to cache-line
     ]
 
 
@@ -96,10 +101,10 @@ def verify_sizes() -> bool:
     
     # Check field offsets
     offsets = {
-        "board": 0,
-        "pi": 192,
-        "z": 256,
-        "mask": 260,
+        "board": _OFFSET_BOARD,
+        "pi":    _OFFSET_PI,
+        "z":     _OFFSET_Z,
+        "mask":  _OFFSET_MASK,
     }
     
     for field_name, expected_offset in offsets.items():
@@ -168,50 +173,52 @@ def create_numpy_views(shm_buffer: memoryview, max_capacity: int) -> Dict[str, n
 
     Returns:
         Dictionary of NumPy arrays backed by shared memory:
-        - 'boards': [max_capacity, 3, 4, 4] float32
-        - 'pi':     [max_capacity, 16]       float32
-        - 'z':      [max_capacity]            float32
-        - 'mask':   [max_capacity, 16]       float32
+        - 'boards': [max_capacity, INPUT_PLANES, BOARD_HEIGHT, BOARD_WIDTH] float32
+        - 'pi':     [max_capacity, POLICY_SIZE]                              float32
+        - 'z':      [max_capacity]                                           float32
+        - 'mask':   [max_capacity, POLICY_SIZE]                              float32
     """
-    header_size   = ctypes.sizeof(TrainingBufferHeader)   # 64
-    position_size = TRAINING_POSITION_BYTES               # 324
+    header_size   = ctypes.sizeof(TrainingBufferHeader)
+    position_size = TRAINING_POSITION_BYTES
 
     positions_offset = header_size
-    
-    # BOARDS: shape=[max_capacity, 3, 4, 4], field offset 0 within each position
-    # Strides: position(324), channel(4*4*4=64), row(4*4=16), element(4)
+
+    # BOARDS: shape=[max_capacity, INPUT_PLANES, BOARD_HEIGHT, BOARD_WIDTH]
+    # Strides: position_size, BOARD_HEIGHT*BOARD_WIDTH*4, BOARD_WIDTH*4, 4
+    _board_channel_stride = BOARD_HEIGHT * BOARD_WIDTH * 4
+    _board_row_stride     = BOARD_WIDTH * 4
     boards = np.ndarray(
-        shape=(max_capacity, 3, 4, 4),
+        shape=(max_capacity, INPUT_PLANES, BOARD_HEIGHT, BOARD_WIDTH),
         dtype=np.float32,
         buffer=shm_buffer,
-        offset=positions_offset + 0,
-        strides=(position_size, 64, 16, 4),
+        offset=positions_offset + _OFFSET_BOARD,
+        strides=(position_size, _board_channel_stride, _board_row_stride, 4),
     )
 
-    # PI: shape=[max_capacity, 16], field offset 192 within each position
+    # PI: shape=[max_capacity, POLICY_SIZE]
     pi = np.ndarray(
-        shape=(max_capacity, 16),
+        shape=(max_capacity, TRAINING_POLICY_SIZE),
         dtype=np.float32,
         buffer=shm_buffer,
-        offset=positions_offset + 192,
+        offset=positions_offset + _OFFSET_PI,
         strides=(position_size, 4),
     )
 
-    # Z: shape=[max_capacity], field offset 256 within each position
+    # Z: shape=[max_capacity]
     z = np.ndarray(
         shape=(max_capacity,),
         dtype=np.float32,
         buffer=shm_buffer,
-        offset=positions_offset + 256,
+        offset=positions_offset + _OFFSET_Z,
         strides=(position_size,),
     )
 
-    # MASK: shape=[max_capacity, 16], field offset 260 within each position
+    # MASK: shape=[max_capacity, POLICY_SIZE]
     mask = np.ndarray(
-        shape=(max_capacity, 16),
+        shape=(max_capacity, TRAINING_POLICY_SIZE),
         dtype=np.float32,
         buffer=shm_buffer,
-        offset=positions_offset + 260,
+        offset=positions_offset + _OFFSET_MASK,
         strides=(position_size, 4),
     )
     

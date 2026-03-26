@@ -31,11 +31,11 @@ void Game::collect_position(const float* policy,
     Cell_state current_player = current_player_index == 0 ? Cell_state::X : Cell_state::O;
     
     static_assert(sizeof(pos.board) == INPUT_SIZE * sizeof(float),
-                  "Position::board size mismatch — expected 3*16 floats");
+                  "Position::board size mismatch — expected INPUT_SIZE floats");
     static_assert(sizeof(pos.policy) == BOARD_CELLS * sizeof(float),
-                  "Position::policy size mismatch — expected 16 floats");
+                  "Position::policy size mismatch — expected BOARD_CELLS floats");
     static_assert(sizeof(pos.mask) == BOARD_CELLS * sizeof(float),
-                  "Position::mask size mismatch — expected 16 floats");
+                  "Position::mask size mismatch — expected BOARD_CELLS floats");
 
     board.to_float_array(current_player, pos.board.data());
     board.get_legal_mask(current_player, pos.mask.data());
@@ -47,7 +47,7 @@ void Game::collect_position(const float* policy,
 
 Cell_state Game::play() {
 
-    int max_move = 70;
+    int max_move = MAX_GAME_MOVES;
     current_game_moves_ = 0;
 
     Cell_state current_player = current_player_index == 0 ? Cell_state::X : Cell_state::O;
@@ -85,7 +85,7 @@ Cell_state Game::play() {
 
         // Update string move history
         move_history += std::to_string(current_game_moves_ + 1) + "." 
-           + char('0' + (4 - chosen_move.x)) 
+           + char('0' + (BOARD_SIZE - chosen_move.x))
            + char('a' + chosen_move.y) 
            + " ";
 
@@ -108,7 +108,7 @@ Cell_state Game::play() {
 
 Cell_state Game::play_via_api() {
 
-    int max_move = 70;
+    int max_move = MAX_GAME_MOVES;
     current_game_moves_ = 0;
 
     Cell_state current_player = current_player_index == 0 ? Cell_state::X : Cell_state::O;
@@ -146,7 +146,7 @@ Cell_state Game::play_via_api() {
 
         // Update string move history
         move_history += std::to_string(current_game_moves_ + 1) + "." 
-           + char('0' + (4 - chosen_move.x)) 
+           + char('0' + (BOARD_SIZE - chosen_move.x))
            + char('a' + chosen_move.y) 
            + " ";
 

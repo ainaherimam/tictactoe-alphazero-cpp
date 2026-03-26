@@ -11,16 +11,13 @@ import ctypes
 import numpy as np
 from enum import IntEnum
 
+from src.constants import INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, INPUT_SIZE, POLICY_SIZE
+
 # ============================================================================
 # CONFIGURATION CONSTANTS (must match C++ exactly)
 # ============================================================================
 
 MAX_BATCH_SIZE = 256
-INPUT_CHANNELS = 3
-BOARD_HEIGHT = 4
-BOARD_WIDTH = 4
-INPUT_SIZE = INPUT_CHANNELS * BOARD_HEIGHT * BOARD_WIDTH
-POLICY_SIZE = BOARD_HEIGHT * BOARD_WIDTH
 
 # ============================================================================
 # JOB STATE ENUM

@@ -117,7 +117,7 @@ float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node
     uint64_t job_id = queue->submit(input, mask);
     queue->wait(job_id, policy, &value);
     
-    std::vector<std::pair<Move, float>> move_with_value = extract_valid_moves_with_value(policy);
+    std::vector<std::pair<Move, float>> move_with_value = extract_valid_moves_with_value(policy, mask);
 
 
     logger->log_nn_evaluation(node->move, value, move_with_value.size());
@@ -250,20 +250,19 @@ std::pair<std::shared_ptr<Mcts_agent_selfplay::Node>, std::vector<float>> Mcts_a
 }
 
 std::vector<std::pair<Move, float>> Mcts_agent_selfplay::extract_valid_moves_with_value(
-    const float* probs) const {
+    const float* probs, const float* mask) const {
 
     const int total = X_ * Y_ * DIR_ * TAR_;
 
-    std::vector<std::pair< Move, float>> moves;
+    std::vector<std::pair<Move, float>> moves;
     moves.reserve(total);
 
     float sum = 0.0f;
 
     for (int idx = 0; idx < total; idx++) {
-        float p = probs[idx];
-        if (p <= 0.0f){
+        if (mask[idx] <= 0.0f) {
             continue;
-        } 
+        }
 
         int t = idx;
         int x = t / (Y_ * DIR_ * TAR_);
@@ -274,8 +273,8 @@ std::vector<std::pair<Move, float>> Mcts_agent_selfplay::extract_valid_moves_wit
         int tar = (t % TAR_) - 1;
 
         Move move = {x, y, dir, tar};
-        moves.emplace_back(move, p);
-        sum += p;
+        moves.emplace_back(move, probs[idx]);
+        sum += probs[idx];
     }
 
     for (auto& m : moves) {

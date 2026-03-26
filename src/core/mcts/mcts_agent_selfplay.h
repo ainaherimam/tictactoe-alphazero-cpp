@@ -214,11 +214,12 @@ private:
      * Extracts non-zero entries from the policy tensor and converts them into
      * a list of move-probability pairs for easier processing.
      *
-     * @param probs 1D tensor of log probabilities for all moves from NN
+     * @param probs 1D tensor of probabilities for all moves from NN
+     * @param mask  1D legal-move mask (1.0 = legal, 0.0 = illegal)
      *
      * @return Vector of pairs: (move array {x, y, direction, target}, normalized probability)
      */
-    std::vector<std::pair<Move, float>> extract_valid_moves_with_value(const float* probs) const;
+    std::vector<std::pair<Move, float>> extract_valid_moves_with_value(const float* probs, const float* mask) const;
 
     /**
      * @brief Select a leaf by moving the tree using PUCT Score

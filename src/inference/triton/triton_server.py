@@ -37,6 +37,7 @@ from pytriton.model_config import Tensor, ModelConfig, DynamicBatcher
 from pytriton.triton import Triton, TritonConfig
 
 from src.models.alphazero_model import create_inference_state, load_checkpoint_for_inference
+from src.constants import INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, INPUT_SIZE, POLICY_SIZE
 
 # ============================================================================
 # LOGGING
@@ -101,7 +102,7 @@ batch_counter = 0
 # MODEL SETUP
 # ============================================================================
 
-def setup_model(checkpoint_path=None, num_channels=64, num_res_blocks=3, num_actions=16):
+def setup_model(checkpoint_path=None, num_channels=64, num_res_blocks=3, num_actions=POLICY_SIZE):
     """Load (or re-load) model weights and (re-)JIT compile inference function."""
     global MODEL_STATE, jit_predict
 
@@ -136,7 +137,7 @@ def setup_model(checkpoint_path=None, num_channels=64, num_res_blocks=3, num_act
 
     # Warmup
     logger.info("Warming up...")
-    dummy_boards = jnp.ones((1, 3, 4, 4), dtype=jnp.float32)
+    dummy_boards = jnp.ones((1, INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH), dtype=jnp.float32)
     dummy_mask   = jnp.ones((1, num_actions), dtype=jnp.float32)
     _ = jit_predict(MODEL_STATE['params'], MODEL_STATE['batch_stats'], dummy_boards, dummy_mask)
 
@@ -215,8 +216,8 @@ def infer_fn(boards, mask):
     # -------------------------------------------------------------------------
     prep_start = time.perf_counter()
 
-    # Reshape boards: [batch, 48] -> [batch, 3, 4, 4]
-    boards_reshaped = boards.reshape(batch_size, 3, 4, 4)
+    # Reshape boards: [batch, INPUT_SIZE] -> [batch, INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH]
+    boards_reshaped = boards.reshape(batch_size, INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH)
 
     # Transfer to JAX device
     boards_jax = jnp.asarray(boards_reshaped, dtype=jnp.float32)
@@ -298,7 +299,7 @@ def main():
     parser.add_argument('--watch-dir',       type=str, default=None,  help='Directory to watch for reload triggers (default: checkpoint dir)')
     parser.add_argument('--num-channels',    type=int, default=64,    help='Model channels')
     parser.add_argument('--num-res-blocks',  type=int, default=3,     help='Model residual blocks')
-    parser.add_argument('--num-actions',     type=int, default=16,    help='Number of actions')
+    parser.add_argument('--num-actions',     type=int, default=POLICY_SIZE, help='Number of actions')
     parser.add_argument('--max-batch-size',  type=int, default=32,    help='Max dynamic batch size')
     parser.add_argument('--no-hot-reload',   action='store_true',     help='Disable hot reload watcher')
     parser.add_argument('--max-queue-delay', type=int, default=500,   help='Dynamic batcher queue delay (us)')
@@ -378,11 +379,11 @@ def main():
         model_name="AlphaZero",
         infer_func=infer_fn,
         inputs=[
-            Tensor(name="boards", dtype=np.float32, shape=(48,)),
-            Tensor(name="mask",   dtype=np.float32, shape=(16,)),
+            Tensor(name="boards", dtype=np.float32, shape=(INPUT_SIZE,)),
+            Tensor(name="mask",   dtype=np.float32, shape=(POLICY_SIZE,)),
         ],
         outputs=[
-            Tensor(name="policy", dtype=np.float32, shape=(16,)),
+            Tensor(name="policy", dtype=np.float32, shape=(POLICY_SIZE,)),
             Tensor(name="value",  dtype=np.float32, shape=(1,)),
         ],
         config=model_config,

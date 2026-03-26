@@ -114,7 +114,7 @@ void TrainingShmWriter::flush_game(const PositionPool& pool) {
     if (num_moves == 0) return;
 
     // Compile-time guards — sizes must match training_shm_protocol.h exactly.
-    // TrainingPosition is 384 bytes (192 board + 64 pi + 4 z + 64 mask + 60 padding).
+    // TrainingPosition is TRAINING_POSITION_BYTES (TRAINING_BOARD_SIZE*4 + TRAINING_POLICY_SIZE*4 + 4 + TRAINING_POLICY_SIZE*4 + TRAINING_POSITION_PADDING).
     // The _padding does NOT affect the field offsets, only total struct size.
     static_assert(sizeof(TrainingPosition) == TRAINING_POSITION_BYTES,
                   "TrainingPosition size mismatch — check training_shm_protocol.h");

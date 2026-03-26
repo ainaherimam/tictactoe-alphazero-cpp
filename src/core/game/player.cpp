@@ -10,7 +10,7 @@ std::pair<Move, std::vector<float>> Human_player::choose_move(const Board& board
                                               Cell_state player) {
   int move_index;
   bool valid_choice = false;
-  std::vector<float> dummy(16, 0.0f);
+  std::vector<float> dummy(POLICY_SIZE, 0.0f);
   std::vector<Move> all_moves = board.get_valid_moves(player);
   board.print_valid_moves(all_moves);
   

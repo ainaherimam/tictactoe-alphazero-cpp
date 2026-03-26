@@ -16,10 +16,28 @@
 
 /**
  * @brief Maximum number of concurrent inference requests.
- * 
+ *
  * Must match Python configuration exactly.
  */
 constexpr size_t MAX_BATCH_SIZE = 256;
+
+// ---------------------------------------------------------------------------
+// Derived layout constants for EvalRequest and EvalResponse.
+// These are computed from INPUT_SIZE and POLICY_SIZE so the structs
+// automatically adapt when the board size changes.
+// ---------------------------------------------------------------------------
+
+// EvalRequest: 16-byte fixed header + board_state + legal_mask, padded to 64 bytes.
+constexpr size_t EVAL_REQUEST_DATA_BYTES =
+    16 + INPUT_SIZE * sizeof(float) + POLICY_SIZE * sizeof(float);
+constexpr size_t EVAL_REQUEST_BYTES   = ((EVAL_REQUEST_DATA_BYTES + 63) / 64) * 64;
+constexpr size_t EVAL_REQUEST_PADDING2 = EVAL_REQUEST_BYTES - EVAL_REQUEST_DATA_BYTES;
+
+// EvalResponse: job_id + policy + value, padded to 64 bytes.
+constexpr size_t EVAL_RESPONSE_DATA_BYTES =
+    sizeof(uint64_t) + POLICY_SIZE * sizeof(float) + sizeof(float);
+constexpr size_t EVAL_RESPONSE_BYTES   = ((EVAL_RESPONSE_DATA_BYTES + 63) / 64) * 64;
+constexpr size_t EVAL_RESPONSE_PADDING = EVAL_RESPONSE_BYTES - EVAL_RESPONSE_DATA_BYTES;
 
 /**
  * @enum JobState
@@ -47,14 +65,14 @@ struct EvalRequest {
     std::atomic<JobState> state{JobState::FREE}; ///< Current job state (1 byte at offset 8)
     uint8_t _padding1[7];                      ///< Padding to align to 16 bytes
     
-    float board_state[INPUT_SIZE];             ///< Board state representation (192 bytes at offset 16)
-    float legal_mask[POLICY_SIZE];             ///< Legal move mask (64 bytes at offset 208)
-    
-    uint8_t _padding2[48];                     ///< Padding to reach 320 bytes total
-    
+    float board_state[INPUT_SIZE];             ///< Board state representation (INPUT_SIZE*4 bytes at offset 16)
+    float legal_mask[POLICY_SIZE];             ///< Legal move mask (POLICY_SIZE*4 bytes)
+
+    uint8_t _padding2[EVAL_REQUEST_PADDING2];  ///< Padding to reach EVAL_REQUEST_BYTES total
+
 } __attribute__((aligned(64)));
 
-static_assert(sizeof(EvalRequest) == 320, "EvalRequest must be 320 bytes to match Python");
+static_assert(sizeof(EvalRequest) == EVAL_REQUEST_BYTES, "EvalRequest size mismatch — check EVAL_REQUEST_BYTES");
 static_assert(offsetof(EvalRequest, job_id) == 0, "job_id must be at offset 0");
 static_assert(offsetof(EvalRequest, state) == 8, "state must be at offset 8");
 static_assert(offsetof(EvalRequest, board_state) == 16, "board_state must be at offset 16");
@@ -69,14 +87,14 @@ static_assert(offsetof(EvalRequest, board_state) == 16, "board_state must be at 
 struct EvalResponse {
     std::atomic<uint64_t> job_id{0};           ///< Job identifier matching the request (8 bytes at offset 0)
     
-    float policy[POLICY_SIZE];                 ///< Policy distribution output (64 bytes at offset 8)
-    float value;                               ///< Value estimate output (4 bytes at offset 72)
-    
-    uint8_t _padding[52];                      ///< Padding to reach 128 bytes total
-    
+    float policy[POLICY_SIZE];                 ///< Policy distribution output (POLICY_SIZE*4 bytes at offset 8)
+    float value;                               ///< Value estimate output (4 bytes)
+
+    uint8_t _padding[EVAL_RESPONSE_PADDING];   ///< Padding to reach EVAL_RESPONSE_BYTES total
+
 } __attribute__((aligned(64)));
 
-static_assert(sizeof(EvalResponse) == 128, "EvalResponse must be 128 bytes to match Python");
+static_assert(sizeof(EvalResponse) == EVAL_RESPONSE_BYTES, "EvalResponse size mismatch — check EVAL_RESPONSE_BYTES");
 static_assert(offsetof(EvalResponse, job_id) == 0, "job_id must be at offset 0");
 static_assert(offsetof(EvalResponse, policy) == 8, "policy must be at offset 8");
 

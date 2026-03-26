@@ -17,6 +17,8 @@ from typing import Tuple, Any, Dict, Optional
 import orbax.checkpoint as ocp
 from pathlib import Path
 
+from src.constants import INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, POLICY_SIZE
+
 
 # ============================================================================
 # MODEL ARCHITECTURE
@@ -67,8 +69,7 @@ class AlphaZeroNet(nn.Module):
         p = p.reshape((p.shape[0], -1))  # Flatten
         p = nn.Dense(self.num_actions)(p)
         
-        # Apply mask and log-softmax
-        p = jnp.where(mask > 0, p, -1e9)
+        # Apply log-softmax
         p = jax.nn.log_softmax(p, axis=-1)
         
         # Value head
@@ -229,16 +230,16 @@ class TrainingConfig:
     verbose: bool = True                # Detailed logging
 
 
-def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3, num_actions: int = 16):
+def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3, num_actions: int = POLICY_SIZE):
     """
     Initialize model for inference only (no optimizer).
-    
+
     Args:
         rng: JAX random key
         num_channels: Number of channels in residual blocks
         num_res_blocks: Number of residual blocks
         num_actions: Number of possible actions (policy size)
-    
+
     Returns:
         Dictionary with 'params', 'batch_stats', and 'apply_fn'
     """
@@ -248,9 +249,9 @@ def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3,
         num_res_blocks=num_res_blocks,
         num_actions=num_actions
     )
-    
+
     # Initialize with dummy input
-    dummy_board = jnp.zeros((1, 3, 4, 4))
+    dummy_board = jnp.zeros((1, INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH))
     dummy_mask = jnp.ones((1, num_actions))
     
     variables = model.init(rng, dummy_board, dummy_mask, training=False)
@@ -278,12 +279,12 @@ def create_train_state(rng, config: TrainingConfig):
     model = AlphaZeroNet(
         num_channels=config.num_channels,
         num_res_blocks=config.num_res_blocks,
-        num_actions=16
+        num_actions=POLICY_SIZE
     )
-    
+
     # Initialize with dummy input
-    dummy_board = jnp.zeros((1, 3, 4, 4))
-    dummy_mask = jnp.ones((1, 16))
+    dummy_board = jnp.zeros((1, INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH))
+    dummy_mask = jnp.ones((1, POLICY_SIZE))
     
     variables = model.init(rng, dummy_board, dummy_mask, training=False)
     params = variables['params']

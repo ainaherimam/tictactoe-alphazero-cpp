@@ -18,10 +18,14 @@ constexpr int INPUT_SIZE = INPUT_PLANES * BOARD_HEIGHT * BOARD_WIDTH;
 constexpr int POLICY_SIZE = BOARD_CELLS;
 
 
-//MCTS 
+//WIN CONDITION
+constexpr int WIN_LENGTH = 3;           // number of consecutive pieces needed to win
+constexpr size_t HISTORY_LENGTH = 4;    // number of past board states stored in Board::history
+
+//MCTS
 constexpr float DIRICHLET_ALPHA = 0.4f;
 constexpr float EXPLORATION_FRACTION = 0.25f;
-constexpr size_t MAX_GAME_MOVES = 20; 
+constexpr size_t MAX_GAME_MOVES = 20;
 
 
 //SELFPLAY CONFIG

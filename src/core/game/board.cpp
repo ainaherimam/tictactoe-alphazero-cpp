@@ -22,6 +22,12 @@ Board::Board(int board_size)
 
 int Board::get_board_size() const { return board_size; }
 
+void Board::load_board(const std::array<Cell_state, BOARD_CELLS>& cells) {
+    for (int x = 0; x < board_size; ++x)
+        for (int y = 0; y < board_size; ++y)
+            board[x][y] = cells[x * board_size + y];
+}
+
 bool Board::is_within_bounds(Move move) const {
     return move.x >= 0 && move.y < board_size && move.y >= 0 && move.x < board_size;
 }
@@ -76,16 +82,15 @@ void Board::make_move(Move move, Cell_state player) {
 
 void Board::to_float_array(Cell_state player, float* output) const {
     // Initialize to zero
-    for (int i = 0; i < 3 * X_ * Y_; ++i) {
+    for (int i = 0; i < INPUT_SIZE; ++i) {
         output[i] = 0.0f;
     }
-    
+
     for (int x = 0; x < board_size; ++x) {
         for (int y = 0; y < board_size; ++y) {
             int plane0_idx = 0 * BOARD_CELLS + x * BOARD_WIDTH + y;
             int plane1_idx = 1 * BOARD_CELLS + x * BOARD_WIDTH + y;
-            int plane2_idx = 2 * BOARD_CELLS + x * BOARD_WIDTH + y;
-            
+
             // Plane 0: Current player's pieces
             if (board[x][y] == player) {
                 output[plane0_idx] = 1.0f;
@@ -94,8 +99,6 @@ void Board::to_float_array(Cell_state player, float* output) const {
             else if (board[x][y] != Cell_state::Empty) {
                 output[plane1_idx] = 1.0f;
             }
-            // Plane 2: Current player indicator (0 for X, 1 for O)
-            output[plane2_idx] = (player == Cell_state::X) ? 0.0f : 1.0f;
         }
     }
 }

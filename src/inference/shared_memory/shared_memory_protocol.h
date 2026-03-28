@@ -58,7 +58,7 @@ enum class JobState : uint8_t {
  * @brief Request structure for neural network inference.
  * 
  * IMPORTANT: Field order and padding must match Python exactly!
- * Total size: 320 bytes (cache-line aligned)
+ * Total size: 256 bytes (cache-line aligned)
  */
 struct EvalRequest {
     std::atomic<uint64_t> job_id{0};           ///< Unique job identifier (8 bytes at offset 0)

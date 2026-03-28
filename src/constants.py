@@ -17,7 +17,7 @@ BOARD_CELLS  = BOARD_SIZE * BOARD_SIZE       # 16
 # NEURAL NETWORK INPUT
 # ============================================================================
 
-INPUT_PLANES   = 3                           # current pieces, opponent pieces, player indicator
+INPUT_PLANES   = 2                           # current pieces, opponent pieces
 INPUT_CHANNELS = INPUT_PLANES                # alias used in some modules
 INPUT_SIZE     = INPUT_PLANES * BOARD_HEIGHT * BOARD_WIDTH  # 48 floats (flat)
 

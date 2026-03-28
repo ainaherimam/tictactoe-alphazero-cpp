@@ -36,21 +36,21 @@ constexpr size_t TRAINING_POSITION_BYTES   = ((TRAINING_POSITION_DATA_BYTES + 63
 constexpr size_t TRAINING_POSITION_PADDING = TRAINING_POSITION_BYTES - TRAINING_POSITION_DATA_BYTES;
 
 // ============================================================================
-// TRAINING POSITION STRUCTURE (384 bytes, cache-line aligned)
+// TRAINING POSITION STRUCTURE (320 bytes, cache-line aligned)
 // ============================================================================
 
 struct TrainingPosition {
-    // Board state: [3][4][4] float array (same as inference INPUT_SIZE)
-    float board[TRAINING_BOARD_SIZE];          // 192 bytes at offset 0
-    
+    // Board state: [2][4][4] float array (same as inference INPUT_SIZE)
+    float board[TRAINING_BOARD_SIZE];          // 128 bytes at offset 0
+
     // Policy target: [16] float array (MCTS visit distribution)
-    float pi[TRAINING_POLICY_SIZE];            // 64 bytes at offset 192
-    
+    float pi[TRAINING_POLICY_SIZE];            // 64 bytes at offset 128
+
     // Value target: scalar (game outcome from this position's perspective)
-    float z;                                   // 4 bytes at offset 256
-    
+    float z;                                   // 4 bytes at offset 192
+
     // Legal move mask: [16] float array (1.0 = legal, 0.0 = illegal)
-    float mask[TRAINING_POLICY_SIZE];          // 64 bytes at offset 260
+    float mask[TRAINING_POLICY_SIZE];          // 64 bytes at offset 196
     
     // Padding to reach TRAINING_POSITION_BYTES (cache-line alignment)
     uint8_t _padding[TRAINING_POSITION_PADDING]; // TRAINING_POSITION_BYTES - TRAINING_POSITION_DATA_BYTES
@@ -58,8 +58,8 @@ struct TrainingPosition {
     // Total: TRAINING_POSITION_BYTES (derived from TRAINING_BOARD_SIZE + TRAINING_POLICY_SIZE)
 } __attribute__((aligned(64)));
 
-static_assert(sizeof(TrainingPosition) == TRAINING_POSITION_BYTES, 
-              "TrainingPosition must be 384 bytes");
+static_assert(sizeof(TrainingPosition) == TRAINING_POSITION_BYTES,
+              "TrainingPosition must be 320 bytes");
 static_assert(offsetof(TrainingPosition, board) == 0,
               "board must be at offset 0");
 static_assert(offsetof(TrainingPosition, pi) == TRAINING_BOARD_SIZE * sizeof(float),

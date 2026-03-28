@@ -234,6 +234,16 @@ HTML = r"""<!DOCTYPE html>
   }
   .cell.ai-shown .ai-bg { opacity: 1; }
   .cell.ai-shown .ai-prob { opacity: 1; }
+  .cell .ng-label {
+    position: absolute; top: 4px; left: 5px;
+    font-family: 'Space Mono', monospace; font-size: 0.65rem; font-weight: 700;
+    z-index: 3; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+  }
+  .cell.ng-shown .ai-bg { opacity: 1; }
+  .cell.ng-shown .ng-label { opacity: 1; }
+  .ng-label.win  { color: #4ade80; text-shadow: 0 0 8px rgba(74,222,128,0.8); }
+  .ng-label.draw { color: #ffd166; text-shadow: 0 0 8px rgba(255,209,102,0.8); }
+  .ng-label.loss { color: #ff4560; text-shadow: 0 0 8px rgba(255,69,96,0.8); }
   .cell.losing { animation: lose-pulse 0.6s ease-in-out 2; }
   @keyframes lose-pulse {
     0%,100% { box-shadow: none; }
@@ -269,9 +279,20 @@ HTML = r"""<!DOCTYPE html>
   .btn-ai:hover { background: rgba(0,201,167,0.15); box-shadow: 0 0 12px var(--glow-o); }
   .btn-ai:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-ai.loading { animation: pulse-btn 0.8s ease-in-out infinite; }
+  .btn-ai.validate { background: rgba(0,201,167,0.25); box-shadow: 0 0 14px var(--glow-o); font-weight: 700; }
+  .btn-ai.validate:hover { background: rgba(0,201,167,0.4); }
+  .btn-negamax { border-color: #a78bfa; color: #a78bfa; background: rgba(167,139,250,0.08); flex: 1; }
+  .btn-negamax:hover { background: rgba(167,139,250,0.15); box-shadow: 0 0 12px rgba(167,139,250,0.4); }
+  .btn-negamax:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-negamax.loading { animation: pulse-btn 0.8s ease-in-out infinite; }
+  .btn-negamax.validate { background: rgba(167,139,250,0.25); box-shadow: 0 0 14px rgba(167,139,250,0.4); font-weight: 700; }
+  .btn-negamax.validate:hover { background: rgba(167,139,250,0.4); }
   @keyframes pulse-btn { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
   .btn-reset { color: var(--accent-warn); border-color: rgba(255,209,102,0.4); }
   .btn-reset:hover { background: rgba(255,209,102,0.08); }
+  .btn-undo { color: var(--text); }
+  .btn-undo:hover { background: rgba(255,255,255,0.05); }
+  .btn-undo:disabled { opacity: 0.3; cursor: not-allowed; }
 
   /* Sidebar */
   .sidebar { display: flex; flex-direction: column; gap: 16px; }
@@ -306,6 +327,25 @@ HTML = r"""<!DOCTYPE html>
   .history-item { font-family: 'Space Mono', monospace; font-size: 0.65rem; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--border); }
   .history-item.X { color: var(--accent-x); border-color: rgba(255,69,96,0.3); background: rgba(255,69,96,0.07); }
   .history-item.O { color: var(--accent-o); border-color: rgba(0,201,167,0.3); background: rgba(0,201,167,0.07); }
+
+  /* Policy distribution panel */
+  .policy-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: none; }
+  .policy-panel.visible { display: block; }
+  .policy-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .policy-cell {
+    background: var(--surface2); border-radius: 5px; padding: 4px 3px 3px;
+    position: relative; overflow: hidden; height: 44px;
+    display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+    border: 1px solid var(--border);
+  }
+  .policy-bar {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,201,167,0.25); border-radius: 0 0 4px 4px;
+    transition: height 0.35s ease;
+  }
+  .policy-bar.best { background: rgba(0,201,167,0.55); }
+  .policy-val { font-family: 'Space Mono', monospace; font-size: 0.5rem; color: var(--text); position: relative; z-index: 1; line-height: 1.2; }
+  .policy-idx { font-family: 'Space Mono', monospace; font-size: 0.4rem; color: var(--text-dim); position: relative; z-index: 1; }
 
   /* ══════════════════════════════════════════════════
      VIEWER TAB — restyled into game.html dark theme
@@ -498,7 +538,9 @@ HTML = r"""<!DOCTYPE html>
         </div>
 
         <div class="controls">
-          <button class="btn btn-ai" id="btnAI" onclick="requestAI()">⚡ Ask AI</button>
+          <button class="btn btn-ai" id="btnAI" onclick="handleAIButton()">⚡ Ask AI</button>
+          <button class="btn btn-negamax" id="btnNegamax" onclick="handleNegamaxButton()">🧮 Ask Negamax</button>
+          <button class="btn btn-undo" id="btnUndo" onclick="undoMove()" disabled>◀ Undo</button>
           <button class="btn btn-reset" onclick="resetGame()">↺ Reset</button>
         </div>
       </div>
@@ -506,7 +548,7 @@ HTML = r"""<!DOCTYPE html>
       <!-- Right: sidebar -->
       <div class="sidebar">
         <div class="value-panel" id="valuePanel">
-          <div class="value-label">🧠 Neural Value — Current Player</div>
+          <div class="value-label" id="valuePanelLabel">🧠 Neural Value — Current Player</div>
           <div class="value-display" id="valueDisplay">—</div>
           <div class="value-interp" id="valueInterp"></div>
           <div class="value-bar-wrap">
@@ -515,10 +557,10 @@ HTML = r"""<!DOCTYPE html>
         </div>
 
         <div class="config-panel">
-          <div class="config-title">⚙ Proxy → Triton</div>
+          <div class="config-title">⚙ MCTS Server</div>
           <div class="config-row">
             <label>Host:Port</label>
-            <input class="config-input" id="tritonHost" value="http://localhost:5555" placeholder="http://localhost:5555">
+            <input class="config-input" id="mctsHost" value="http://localhost:5556" placeholder="http://localhost:5556">
           </div>
           <div style="margin-top:8px; display:flex; align-items:center;">
             <span class="status-dot" id="statusDot"></span>
@@ -526,9 +568,22 @@ HTML = r"""<!DOCTYPE html>
           </div>
         </div>
 
+        <div class="config-panel">
+          <div class="config-title" style="color:#a78bfa;">♟ Negamax Server</div>
+          <div class="config-row">
+            <label>Host:Port</label>
+            <input class="config-input" id="negamaxHost" value="http://localhost:5557" placeholder="http://localhost:5557">
+          </div>
+        </div>
+
         <div class="history-panel">
           <div class="history-title">📜 Move History</div>
           <div class="history-list" id="historyList"></div>
+        </div>
+
+        <div class="policy-panel" id="policyPanel">
+          <div class="value-label">📊 Policy Distribution</div>
+          <div class="policy-grid" id="policyGrid"></div>
         </div>
       </div>
     </div>
@@ -632,6 +687,12 @@ let currentPlayer = 'X';
 let gameOver = false;
 let moveHistory = [];
 let aiShowing = false;
+let boardHistory = [];  // stack of {board, currentPlayer} snapshots for undo
+let aiPending = false;  // true when AI result is shown and awaiting validation
+let aiSuggestedMove = -1;
+let negamaxShowing = false;
+let negamaxPending = false;
+let negamaxSuggestedMove = -1;
 
 function initBoard() {
   const boardEl = document.getElementById('board');
@@ -643,9 +704,26 @@ function initBoard() {
     cell.innerHTML = `
       <div class="ai-bg" id="ai-bg-${i}"></div>
       <span class="piece" id="piece-${i}"></span>
-      <span class="ai-prob" id="ai-prob-${i}"></span>`;
+      <span class="ai-prob" id="ai-prob-${i}"></span>
+      <span class="ng-label" id="ng-label-${i}"></span>`;
     cell.addEventListener('click', () => handleCellClick(i));
     boardEl.appendChild(cell);
+  }
+  initPolicyGrid();
+}
+
+function initPolicyGrid() {
+  const grid = document.getElementById('policyGrid');
+  grid.innerHTML = '';
+  for (let i = 0; i < 16; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'policy-cell';
+    cell.id = `pcell-${i}`;
+    cell.innerHTML = `
+      <div class="policy-bar" id="pbar-${i}" style="height:0%"></div>
+      <div class="policy-val" id="pval-${i}">—</div>
+      <div class="policy-idx">R${Math.floor(i/4)+1}C${i%4+1}</div>`;
+    grid.appendChild(cell);
   }
 }
 
@@ -690,6 +768,10 @@ function handleCellClick(idx) {
 }
 
 function placeMove(idx, player) {
+  boardHistory.push({ board: [...board], currentPlayer: player });
+  document.getElementById('btnUndo').disabled = false;
+  if (aiPending) resetAIButton();
+  if (negamaxPending) resetNegamaxButton();
   board[idx] = player;
   moveHistory.push({ player, idx, move: moveNumber(idx) });
   addHistory(player, idx);
@@ -703,6 +785,7 @@ function placeMove(idx, player) {
   } else {
     currentPlayer = player === 'X' ? 'O' : 'X'; // update BEFORE render so indicator is correct
     clearAIOverlay();
+    clearNegamaxOverlay();
     renderBoard();
   }
 }
@@ -728,6 +811,7 @@ function endGame(result) {
   const tp = document.getElementById('turnPlayer');
   tp.textContent = result ? (result.loser==='X'?'O':'X')+' WIN' : 'DRAW';
   document.getElementById('btnAI').disabled = true;
+  document.getElementById('btnNegamax').disabled = true;
 }
 
 function addHistory(player, idx) {
@@ -742,13 +826,38 @@ function addHistory(player, idx) {
 function resetGame() {
   board = Array(16).fill(EMPTY);
   currentPlayer = 'X'; gameOver = false; moveHistory = []; aiShowing = false;
+  negamaxShowing = false; negamaxPending = false; negamaxSuggestedMove = -1;
+  boardHistory = [];
   document.getElementById('gameResult').classList.remove('visible');
   document.getElementById('historyList').innerHTML = '';
   document.getElementById('valuePanel').classList.remove('visible');
-  document.getElementById('btnAI').disabled = false;
+  document.getElementById('valuePanelLabel').textContent = '🧠 Neural Value — Current Player';
+  document.getElementById('btnUndo').disabled = true;
+  resetAIButton();
+  resetNegamaxButton();
+  clearPolicyPanel();
   const tp = document.getElementById('turnPlayer');
   tp.textContent = 'X'; tp.className = 'turn-player X';
   initBoard(); renderBoard();
+}
+
+function undoMove() {
+  if (boardHistory.length === 0) return;
+  const snap = boardHistory.pop();
+  board = snap.board;
+  currentPlayer = snap.currentPlayer;
+  gameOver = false;
+  moveHistory.pop();
+  const list = document.getElementById('historyList');
+  if (list.lastChild) list.removeChild(list.lastChild);
+  document.getElementById('gameResult').classList.remove('visible');
+  document.getElementById('btnUndo').disabled = boardHistory.length === 0;
+  resetAIButton();
+  resetNegamaxButton();
+  clearAIOverlay();
+  clearNegamaxOverlay();
+  clearPolicyPanel();
+  renderBoard();
 }
 
 function boardToFloat(player) {
@@ -787,20 +896,61 @@ async function callTriton(boardFloat, maskFloat) {
   };
 }
 
+async function callMCTSServer(player) {
+  const host = document.getElementById('mctsHost').value.trim();
+  const url = `${host}/mcts`;
+  const boardInts = board.map(c => c === null ? 0 : c === 'X' ? 1 : 2);
+  const payload = { board: boardInts, player: player };
+  const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  if (!resp.ok) { const t = await resp.text(); throw new Error(`MCTS server error ${resp.status}: ${t}`); }
+  const data = await resp.json();
+  return { policy: data.policy, value: data.value ?? 0.0 };
+}
+
+function handleAIButton() {
+  if (aiPending) validateAIMove();
+  else requestAI();
+}
+
 async function requestAI() {
   if (gameOver) return;
+  clearNegamaxOverlay();
   const btn = document.getElementById('btnAI');
   btn.disabled = true; btn.classList.add('loading'); btn.textContent = '⏳ Thinking...';
-  setStatus('loading','Querying Triton...');
+  setStatus('loading','Running MCTS...');
   try {
-    const { policy, value } = await callTriton(boardToFloat(currentPlayer), getLegalMask());
+    const { policy, value } = await callMCTSServer(currentPlayer);
     setStatus('ok','Connected');
     showAIOverlay(policy, value);
     let bestIdx=-1, bestProb=-1;
     for (let i=0;i<16;i++) if (board[i]===EMPTY && policy[i]>bestProb) { bestProb=policy[i]; bestIdx=i; }
-    setTimeout(() => { if (!gameOver && bestIdx>=0) placeMove(bestIdx, currentPlayer); }, 800);
-  } catch(err) { setStatus('err', err.message.slice(0,60)); console.error(err); }
-  finally { btn.disabled=gameOver; btn.classList.remove('loading'); btn.textContent='⚡ Ask AI'; }
+    aiSuggestedMove = bestIdx;
+    aiPending = true;
+    btn.classList.add('validate');
+    btn.textContent = '✓ Validate';
+    btn.disabled = false;
+  } catch(err) {
+    setStatus('err', err.message.slice(0,60)); console.error(err);
+    resetAIButton();
+  } finally {
+    btn.classList.remove('loading');
+  }
+}
+
+function validateAIMove() {
+  if (!aiPending || aiSuggestedMove < 0 || gameOver) return;
+  const move = aiSuggestedMove;
+  resetAIButton();
+  placeMove(move, currentPlayer);
+}
+
+function resetAIButton() {
+  aiPending = false;
+  aiSuggestedMove = -1;
+  const btn = document.getElementById('btnAI');
+  btn.classList.remove('validate', 'loading');
+  btn.textContent = '⚡ Ask AI';
+  btn.disabled = gameOver;
 }
 
 function showAIOverlay(policy, value) {
@@ -818,6 +968,7 @@ function showAIOverlay(policy, value) {
   const vDisplay=document.getElementById('valueDisplay');
   const vInterp=document.getElementById('valueInterp');
   const vBar=document.getElementById('valueBar');
+  document.getElementById('valuePanelLabel').textContent = '🧠 Neural Value — Current Player';
   vPanel.classList.add('visible');
   vDisplay.textContent = value.toFixed(3);
   const vPct = ((value+1)/2)*100;
@@ -825,7 +976,25 @@ function showAIOverlay(policy, value) {
   else if (value<-0.15) { vDisplay.className='value-display value-bad'; vInterp.textContent='Unfavourable — be careful!'; vBar.style.background='var(--accent-x)'; }
   else { vDisplay.className='value-display value-neutral'; vInterp.textContent='Balanced / unclear position'; vBar.style.background='var(--accent-warn)'; }
   vBar.style.width=`${Math.max(4,Math.min(96,vPct))}%`;
+  showPolicyPanel(policy);
   aiShowing=true;
+}
+
+function showPolicyPanel(policy) {
+  const maxP = Math.max(...policy);
+  for (let i = 0; i < 16; i++) {
+    const pct = maxP > 0 ? (policy[i] / maxP) * 100 : 0;
+    const bar = document.getElementById(`pbar-${i}`);
+    bar.style.height = `${pct}%`;
+    bar.className = 'policy-bar' + (policy[i] === maxP && maxP > 0 ? ' best' : '');
+    document.getElementById(`pval-${i}`).textContent = (policy[i] * 100).toFixed(1) + '%';
+    document.getElementById(`pcell-${i}`).style.opacity = board[i] !== EMPTY ? '0.35' : '1';
+  }
+  document.getElementById('policyPanel').classList.add('visible');
+}
+
+function clearPolicyPanel() {
+  document.getElementById('policyPanel').classList.remove('visible');
 }
 
 function clearAIOverlay() {
@@ -835,12 +1004,127 @@ function clearAIOverlay() {
     document.getElementById(`ai-bg-${i}`).style.background='transparent';
     document.getElementById(`ai-prob-${i}`).textContent='';
   }
+  clearPolicyPanel();
   aiShowing=false;
 }
 
 function setStatus(state, msg) {
   document.getElementById('statusDot').className=`status-dot ${state}`;
   document.getElementById('statusText').textContent=msg;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEGAMAX
+// ═══════════════════════════════════════════════════════════════════════
+
+async function callNegamaxServer(player) {
+  const host = document.getElementById('negamaxHost').value.trim();
+  const url = `${host}/negamax`;
+  const boardInts = board.map(c => c === null ? 0 : c === 'X' ? 1 : 2);
+  const payload = { board: boardInts, player: player };
+  const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  if (!resp.ok) { const t = await resp.text(); throw new Error(`Negamax server error ${resp.status}: ${t}`); }
+  return await resp.json();
+}
+
+function handleNegamaxButton() {
+  if (negamaxPending) validateNegamaxMove();
+  else requestNegamax();
+}
+
+async function requestNegamax() {
+  if (gameOver) return;
+  clearAIOverlay();
+  const btn = document.getElementById('btnNegamax');
+  btn.disabled = true; btn.classList.add('loading'); btn.textContent = '⏳ Solving...';
+  try {
+    const data = await callNegamaxServer(currentPlayer);
+    showNegamaxOverlay(data.action_values, data.state_value);
+    negamaxSuggestedMove = data.best_move;
+    negamaxPending = true;
+    btn.classList.add('validate');
+    btn.textContent = '✓ Validate';
+    btn.disabled = false;
+  } catch(err) {
+    console.error(err);
+    alert('Negamax server error: ' + err.message);
+    resetNegamaxButton();
+  } finally {
+    btn.classList.remove('loading');
+  }
+}
+
+function validateNegamaxMove() {
+  if (!negamaxPending || negamaxSuggestedMove < 0 || gameOver) return;
+  const move = negamaxSuggestedMove;
+  resetNegamaxButton();
+  placeMove(move, currentPlayer);
+}
+
+function resetNegamaxButton() {
+  negamaxPending = false;
+  negamaxSuggestedMove = -1;
+  const btn = document.getElementById('btnNegamax');
+  if (!btn) return;
+  btn.classList.remove('validate', 'loading');
+  btn.textContent = '🧮 Ask Negamax';
+  btn.disabled = gameOver;
+}
+
+function showNegamaxOverlay(action_values, state_value) {
+  for (let i = 0; i < 16; i++) {
+    const cell  = document.getElementById(`cell-${i}`);
+    const label = document.getElementById(`ng-label-${i}`);
+    const bg    = document.getElementById(`ai-bg-${i}`);
+    const av    = action_values[i];
+    if (av !== null && board[i] === EMPTY) {
+      let cls, bgClr, txt;
+      if      (av ===  1) { cls='win';  bgClr='rgba(74,222,128,0.18)'; txt='W'; }
+      else if (av ===  0) { cls='draw'; bgClr='rgba(255,209,102,0.18)'; txt='D'; }
+      else                { cls='loss'; bgClr='rgba(255,69,96,0.18)';   txt='L'; }
+      label.textContent = txt;
+      label.className   = `ng-label ${cls}`;
+      bg.style.background = bgClr;
+      cell.classList.add('ng-shown');
+    } else {
+      label.textContent = '';
+      label.className   = 'ng-label';
+      bg.style.background = 'transparent';
+      cell.classList.remove('ng-shown');
+    }
+  }
+  const vPanel   = document.getElementById('valuePanel');
+  const vDisplay = document.getElementById('valueDisplay');
+  const vInterp  = document.getElementById('valueInterp');
+  const vBar     = document.getElementById('valueBar');
+  document.getElementById('valuePanelLabel').textContent = '♟ Perfect Value — Current Player';
+  vPanel.classList.add('visible');
+  if (state_value === 1) {
+    vDisplay.textContent = 'WIN';  vDisplay.className = 'value-display value-good';
+    vInterp.textContent  = 'With perfect play, current player wins';
+    vBar.style.background = 'var(--accent-o)'; vBar.style.width = '96%';
+  } else if (state_value === -1) {
+    vDisplay.textContent = 'LOSS'; vDisplay.className = 'value-display value-bad';
+    vInterp.textContent  = 'With perfect play, current player loses';
+    vBar.style.background = 'var(--accent-x)'; vBar.style.width = '4%';
+  } else {
+    vDisplay.textContent = 'DRAW'; vDisplay.className = 'value-display value-neutral';
+    vInterp.textContent  = 'With perfect play, this position is a draw';
+    vBar.style.background = 'var(--accent-warn)'; vBar.style.width = '50%';
+  }
+  negamaxShowing = true;
+}
+
+function clearNegamaxOverlay() {
+  for (let i = 0; i < 16; i++) {
+    const label = document.getElementById(`ng-label-${i}`);
+    if (label) { label.textContent = ''; label.className = 'ng-label'; }
+    const cell = document.getElementById(`cell-${i}`);
+    if (cell) cell.classList.remove('ng-shown');
+    const bg = document.getElementById(`ai-bg-${i}`);
+    if (bg) bg.style.background = 'transparent';
+  }
+  negamaxShowing = false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1166,33 +1450,42 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        # Serve the game UI
-        if self.path in ("/", "/index.html"):
-            body = HTML.encode()
-            self.send_response(200)
-            self.send_cors()
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
-        # Proxy everything else → Triton
         try:
-            target = TRITON_URL + self.path
-            req = urllib.request.urlopen(target, timeout=10)
-            resp_body = req.read()
-            self.send_response(req.status)
-            self.send_cors()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(resp_body)
-        except Exception as e:
-            self.send_response(502)
-            self.send_cors()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+            # Serve the game UI
+            if self.path in ("/", "/index.html"):
+                body = HTML.encode()
+                self.send_response(200)
+                self.send_cors()
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            # Swallow favicon — no icon served
+            if self.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
+                return
+
+            # Proxy everything else → Triton
+            try:
+                target = TRITON_URL + self.path
+                req = urllib.request.urlopen(target, timeout=10)
+                resp_body = req.read()
+                self.send_response(req.status)
+                self.send_cors()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(resp_body)
+            except Exception as e:
+                self.send_response(502)
+                self.send_cors()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
+        except (ConnectionAbortedError, BrokenPipeError):
+            pass  # client closed connection before response completed
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -1218,6 +1511,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(err_body)
+        except (ConnectionAbortedError, BrokenPipeError):
+            pass  # client closed connection before response completed
         except Exception as e:
             self.send_response(502)
             self.send_cors()

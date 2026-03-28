@@ -27,7 +27,7 @@ Mcts_agent_triton::Mcts_agent_triton(const Mcts_triton_config& config)
       }
 
 Mcts_agent_triton::Node::Node(Cell_state player, Move move, float prior_proba, float value_from_nn,
-                       std::shared_ptr<Node> parent_node)
+                       std::weak_ptr<Node> parent_node)
     : value_from_nn(value_from_nn),
       value_from_mcts(0.0f),
       expanded(false),
@@ -66,7 +66,7 @@ std::pair<Move, std::vector<float>> Mcts_agent_triton::choose_move(const Board& 
     logger->log_mcts_start(player);
     // // Create a new root node and expand it
     Move dummy = {-1, -1, -1, -1};
-    root = std::make_shared<Node>(player, dummy, 0.0, 0.0, nullptr);
+    root = std::make_shared<Node>(player, dummy, 0.0, 0.0, std::weak_ptr<Node>{});
 
     // Initialize root with Dirichlet noise for exploration
     initiate_and_run_nn(root, board, true, dirichlet_alpha, dirichlet_epsilon);
@@ -92,6 +92,10 @@ std::pair<Move, std::vector<float>> Mcts_agent_triton::choose_move(const Board& 
                                         child->visit_count, child->prior_proba, child->value_from_nn);
     }
     return {best_child->move, policy_from_mcts};
+}
+
+float Mcts_agent_triton::get_root_value() const {
+    return root ? root->value_from_nn : 0.0f;
 }
 
 float Mcts_agent_triton::initiate_and_run_nn(const std::shared_ptr<Node>& node, const Board& board,
@@ -372,6 +376,6 @@ void Mcts_agent_triton::backpropagate(std::shared_ptr<Node>& node, float value) 
 
         // Move to the parent node for the next loop
         
-        current_node = current_node->parent_node;
+        current_node = current_node->parent_node.lock();
     }
 }

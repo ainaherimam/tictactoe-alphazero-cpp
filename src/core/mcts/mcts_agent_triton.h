@@ -50,6 +50,14 @@ public:
      */
     std::pair<Move, std::vector<float>> choose_move(const Board& board, Cell_state player);
 
+    /**
+     * @brief Returns the neural network value estimate for the root position.
+     *
+     * Valid to call after choose_move(). Returns the NN value from the root
+     * node's first expansion (range: -1.0 to 1.0, positive = good for current player).
+     */
+    float get_root_value() const;
+
 
 private:
     InferenceClient* client;
@@ -124,7 +132,7 @@ private:
         /**
          * @brief Pointer to parent node (nullptr for root)
          */
-        std::shared_ptr<Node> parent_node;
+        std::weak_ptr<Node> parent_node;
 
         /**
          * @brief Mutex for thread-safe node updates during parallel MCTS
@@ -140,8 +148,8 @@ private:
          * @param value_from_nn Value estimate of this state from neural network
          * @param parent_node Parent node pointer (nullptr for root)
          */
-        Node(Cell_state player, Move move, float prior_proba, 
-             float value_from_nn, std::shared_ptr<Node> parent_node = nullptr);
+        Node(Cell_state player, Move move, float prior_proba,
+             float value_from_nn, std::weak_ptr<Node> parent_node = std::weak_ptr<Node>());
     };
 
     std::shared_ptr<Node> root;

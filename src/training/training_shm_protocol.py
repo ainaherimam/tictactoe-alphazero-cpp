@@ -87,7 +87,7 @@ def verify_sizes() -> bool:
     
     # Check TrainingPosition
     print("\n[TrainingPosition]")
-    expected_size = TRAINING_POSITION_BYTES  # 324
+    expected_size = TRAINING_POSITION_BYTES  # 260
     actual_size = ctypes.sizeof(TrainingPosition)
     
     print(f"  Expected size: {expected_size} bytes")
@@ -163,7 +163,7 @@ def create_numpy_views(shm_buffer: memoryview, max_capacity: int) -> Dict[str, n
 
     CRITICAL: Returns VIEWS not copies - changes in shared memory are visible!
 
-    Each TrainingPosition is 384 bytes (60-byte padding for cache-line alignment).
+    Each TrainingPosition is 320 bytes (60-byte padding for cache-line alignment).
     We use NumPy's stride mechanism to reach each data field directly without
     copying — the padding bytes are simply skipped by the larger stride.
 

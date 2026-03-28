@@ -25,10 +25,10 @@ if(DEFINED ENV{TRITON_CLIENT_DIR})
     set(TRITON_CLIENT_DIR $ENV{TRITON_CLIENT_DIR})
     message(STATUS "Using Triton from environment: ${TRITON_CLIENT_DIR}")
 elseif(EXISTS "${CMAKE_SOURCE_DIR}/triton_client")
-    set(TRITON_CLIENT_DIR "/home/aina/tictactoe-alphazero-cpp/triton_client")
+    set(TRITON_CLIENT_DIR "/mnt/c/Users/Aina/Coding/tictactoe-alphazero-cpp/triton_client")
     message(STATUS "Using local Triton installation: ${TRITON_CLIENT_DIR}")
 elseif(EXISTS "$ENV{HOME}/triton_client")
-    set(TRITON_CLIENT_DIR "/home/aina/tictactoe-alphazero-cpp/triton_client")
+    set(TRITON_CLIENT_DIR "/mnt/c/Users/Aina/Coding/tictactoe-alphazero-cpp/triton_client")
     message(STATUS "Using Triton from home directory: ${TRITON_CLIENT_DIR}")
 else()
     message(WARNING "Triton client directory not found. Set TRITON_CLIENT_DIR or place triton_client/ in the project root.")
@@ -130,9 +130,49 @@ add_executable(AlphaZero_TTT_Eval
     executables/eval.cpp
 )
 
+add_executable(AlphaZero_MCTS_Server
+    executables/mcts_server.cpp
+)
 
 target_link_libraries(AlphaZero_TTT PRIVATE az_core)
 target_link_libraries(AlphaZero_TTT_Eval PRIVATE az_core)
+target_link_libraries(AlphaZero_MCTS_Server PRIVATE az_core)
+
+# ============================================================
+# === Misere Solver =========================================
+# ============================================================
+
+add_executable(MisereSolver
+    src/core/solver/solver_main.cpp
+    src/core/solver/misere_solver.cpp
+)
+
+target_include_directories(MisereSolver PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_compile_options(MisereSolver PRIVATE -O3 -march=native -DNDEBUG)
+
+# ============================================================
+# === Negamax HTTP Server ====================================
+# ============================================================
+
+add_executable(NegamaxServer
+    executables/negamax_server.cpp
+    src/core/solver/misere_solver.cpp
+)
+
+target_include_directories(NegamaxServer PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${Boost_INCLUDE_DIRS}
+)
+
+target_link_libraries(NegamaxServer PRIVATE
+    ${Boost_LIBRARIES}
+    pthread
+)
+
+target_compile_options(NegamaxServer PRIVATE -O3 -march=native -DNDEBUG)
 
 
 # ============================================================
@@ -156,6 +196,9 @@ endif()
 foreach(target
     AlphaZero_TTT
     AlphaZero_TTT_Eval
+    AlphaZero_MCTS_Server
+    MisereSolver
+    NegamaxServer
 )
     set_property(TARGET ${target}
         PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE
@@ -169,6 +212,9 @@ endforeach()
 install(TARGETS
     AlphaZero_TTT
     AlphaZero_TTT_Eval
+    AlphaZero_MCTS_Server
+    MisereSolver
+    NegamaxServer
 )
 
 # ============================================================

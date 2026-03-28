@@ -74,7 +74,7 @@ def augment_batch(batch_dict: dict, rng: np.random.Generator) -> dict:
     B = batch_dict['boards'].shape[0]
     sym_indices = rng.integers(0, 8, size=B)
 
-    boards = batch_dict['boards'].copy()                                    # [B, 3, H, W]
+    boards = batch_dict['boards'].copy()                                    # [B, 2, H, W]
     pi     = batch_dict['pi'].reshape(B, BOARD_HEIGHT, BOARD_WIDTH).copy()  # [B, H, W]
     mask   = batch_dict['mask'].reshape(B, BOARD_HEIGHT, BOARD_WIDTH).copy()
 

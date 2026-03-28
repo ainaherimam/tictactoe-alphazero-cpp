@@ -108,7 +108,7 @@ def alphazero_loss(params, state, batch):
     Returns:
         (total_loss, (metrics_dict, new_batch_stats))
     """
-    boards = batch['boards']  # [B, 3, 4, 4]
+    boards = batch['boards']  # [B, 2, 4, 4]
     pi_target = batch['pi']   # [B, 16]
     z_target = batch['z']     # [B]
     mask = batch['mask']      # [B, 16]

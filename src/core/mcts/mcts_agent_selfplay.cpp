@@ -27,7 +27,7 @@ Mcts_agent_selfplay::Mcts_agent_selfplay(const Mcts_config& config)
       }
 
 Mcts_agent_selfplay::Node::Node(Cell_state player, Move move, float prior_proba, float value_from_nn,
-                       std::shared_ptr<Node> parent_node)
+                       std::weak_ptr<Node> parent_node)
     : value_from_nn(value_from_nn),
       value_from_mcts(0.0f),
       expanded(false),
@@ -62,11 +62,51 @@ std::vector<float> Mcts_agent_selfplay::generate_dirichlet_noise(int num_moves, 
 
 std::pair<Move, std::vector<float>> Mcts_agent_selfplay::choose_move(const Board& board, Cell_state player) {
 
+    // Fast path: just run the NN once and return the raw policy + argmax move.
+    // No MCTS iterations, no Dirichlet noise, no tree building.
+    if (number_iteration < 10) {
+        float input[INPUT_PLANES * X_ * Y_];
+        float mask[POLICY_SIZE];
+        float raw_policy[POLICY_SIZE];
+        float value;
+
+        board.to_float_array(player, input);
+        board.get_legal_mask(player, mask);
+
+        uint64_t job_id = queue->submit(input, mask);
+        queue->wait(job_id, raw_policy, &value);
+
+        // DEBUG: print raw policy to check NN weights on illegal moves
+        printf("[NN RAW POLICY] mask=L(legal) I(illegal)\n");
+        for (int i = 0; i < POLICY_SIZE; ++i) {
+            printf("  [%2d] prob=%.4f %s\n", i, raw_policy[i], mask[i] > 0.0f ? "L" : "I");
+        }
+        printf("[NN VALUE] %.4f\n", value);
+
+        // argmax over ALL cells (including illegal) to check NN output
+        Move best_move = {-1, -1, -1, -1};
+        float best_prob = -1.0f;
+        for (int i = 0; i < POLICY_SIZE; ++i) {
+            if (raw_policy[i] > best_prob) {
+                best_prob = raw_policy[i];
+                best_move = {i / BOARD_WIDTH, i % BOARD_WIDTH, -1, -1};
+            }
+        }
+        printf("[NN BEST MOVE] idx=%d (x=%d y=%d) prob=%.4f legal=%s\n",
+               best_move.x * BOARD_WIDTH + best_move.y, best_move.x, best_move.y,
+               best_prob, mask[best_move.x * BOARD_WIDTH + best_move.y] > 0.0f ? "YES" : "NO");
+
+        // Store root value for get_root_value()
+        Move dummy = {-1, -1, -1, -1};
+        root = std::make_shared<Node>(player, dummy, 0.0f, value, std::weak_ptr<Node>{});
+
+        return {best_move, std::vector<float>(raw_policy, raw_policy + POLICY_SIZE)};
+    }
 
     logger->log_mcts_start(player);
     // // Create a new root node and expand it
     Move dummy = {-1, -1, -1, -1};
-    root = std::make_shared<Node>(player, dummy, 0.0, 0.0, nullptr);
+    root = std::make_shared<Node>(player, dummy, 0.0, 0.0, std::weak_ptr<Node>{});
 
     // Initialize root with Dirichlet noise for exploration
     initiate_and_run_nn(root, board, true, dirichlet_alpha, dirichlet_epsilon);
@@ -92,6 +132,10 @@ std::pair<Move, std::vector<float>> Mcts_agent_selfplay::choose_move(const Board
                                         child->visit_count, child->prior_proba, child->value_from_nn);
     }
     return {best_child->move, policy_from_mcts};
+}
+
+float Mcts_agent_selfplay::get_root_value() const {
+    return root ? root->value_from_nn : 0.0f;
 }
 
 float Mcts_agent_selfplay::initiate_and_run_nn(const std::shared_ptr<Node>& node, const Board& board,
@@ -355,7 +399,7 @@ void Mcts_agent_selfplay::backpropagate(std::shared_ptr<Node>& node, float value
 
     std::shared_ptr<Node> current_node = node;
     while (current_node != nullptr) {
-        
+
         // Lock the node's mutex before updating its data
         std::lock_guard<std::mutex> lock(current_node->node_mutex);
 
@@ -367,15 +411,15 @@ void Mcts_agent_selfplay::backpropagate(std::shared_ptr<Node>& node, float value
         // Increment the node's visit count
         current_node->visit_count += 1;
         // Update accumulated value of the node
-        
+
         current_node->value_from_mcts = current_node->acc_value / current_node->visit_count;
 
-        logger->log_backpropagation_result(current_node->move, 
+        logger->log_backpropagation_result(current_node->move,
                                     current_node->acc_value,
                                     current_node->visit_count);
 
         // Move to the parent node for the next loop
-        
-        current_node = current_node->parent_node;
+
+        current_node = current_node->parent_node.lock();
     }
 }

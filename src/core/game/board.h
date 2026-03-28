@@ -5,6 +5,7 @@
 #include <iostream>
 #include <vector>
 #include "core/game/cell_state.h"
+#include "core/game/constants.h"
 
 /**
  * @struct Move
@@ -88,7 +89,6 @@ public:
      *               (= INPUT_PLANES * BOARD_HEIGHT * BOARD_WIDTH)
      *               Plane 0: Current player's pieces
      *               Plane 1: Opponent's pieces
-     *               Plane 2: Current player indicator (0 for X, 1 for O)
      */
     void to_float_array(Cell_state player, float* output) const;
     
@@ -106,6 +106,12 @@ public:
      */
     void get_legal_mask(Cell_state player, float* output) const;
     
+    /**
+     * @brief Loads a board state directly from a flat array (no history update).
+     * @param cells 16-element array in row-major order (row 0..3, col 0..3)
+     */
+    void load_board(const std::array<Cell_state, BOARD_CELLS>& cells);
+
     /**
      * @brief Displays the board to the specified output stream.
      * @param os The output stream to write to

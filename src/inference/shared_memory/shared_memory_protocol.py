@@ -73,9 +73,9 @@ class EvalRequest(ctypes.Structure):
     ('job_id', AtomicUInt64),                       # 8 bytes
     ('state', AtomicUInt8),                         # 1 byte
     ('_padding1', ctypes.c_uint8 * 7),              # 7 bytes
-    ('board_state', ctypes.c_float * INPUT_SIZE),   # 192 bytes
+    ('board_state', ctypes.c_float * INPUT_SIZE),   # 128 bytes
     ('legal_mask', ctypes.c_float * POLICY_SIZE),   # 64 bytes
-    ('_padding2', ctypes.c_uint8 * 48),             # 48 bytes -> total 320
+    ('_padding2', ctypes.c_uint8 * 48),             # 48 bytes -> total 256
     ]
     
     def __repr__(self):

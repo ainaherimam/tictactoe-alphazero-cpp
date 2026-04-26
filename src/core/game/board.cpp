@@ -11,13 +11,6 @@ Board::Board(int board_size)
       empty_board(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty)),
     history(HISTORY_LENGTH, std::vector<std::vector<Cell_state>>(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty))),
     board(board_size, std::vector<Cell_state>(board_size, Cell_state::Empty)) {
-
-        // board[0][0] = Cell_state::X;
-        // board[3][3] = Cell_state::O;
-        // board[2][1] = Cell_state::O;
-        // board[3][3] = Cell_state::X;
-        // board[0][0] = Cell_state::O;
-        
 }
 
 int Board::get_board_size() const { return board_size; }

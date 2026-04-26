@@ -486,6 +486,91 @@ int MisereSolver::get_best_move(uint16_t bx, uint16_t bo, bool is_x_turn) {
 }
 
 // ---------------------------------------------------------------------------
+// populate_all_positions — BFS every reachable non-terminal position and
+// ensure it has an EXACT entry in tt_ plus a depth_cache_ entry.
+// After this call, get_position_value / get_best_move / depth_to_end never
+// modify the maps, making concurrent reads safe.
+// ---------------------------------------------------------------------------
+
+void MisereSolver::populate_all_positions() {
+    // BFS from the empty board, visiting every reachable non-terminal position.
+    struct Pos { uint16_t bx; uint16_t bo; };
+    std::vector<Pos> queue;
+    queue.push_back({0, 0});
+
+    // Track visited canonical positions.
+    std::unordered_map<uint64_t, bool> visited;
+    {
+        uint16_t cbx, cbo; int sym;
+        canonicalize(0, 0, cbx, cbo, sym);
+        visited[compute_hash(cbx, cbo)] = true;
+    }
+
+    size_t head = 0;
+    while (head < queue.size()) {
+        auto [bx, bo] = queue[head++];
+        int nx = std::popcount(static_cast<unsigned>(bx));
+        int no = std::popcount(static_cast<unsigned>(bo));
+        bool is_x_turn = (nx == no);
+        int depth = nx + no;
+
+        // Skip terminal positions.
+        if (depth > 0) {
+            uint16_t last_bits = is_x_turn ? bo : bx;
+            if (has_line(last_bits)) continue;
+        }
+        if ((bx | bo) == 0xFFFF) continue;
+
+        // Force an EXACT TT entry for this position.
+        get_position_value(bx, bo, is_x_turn);
+
+        // Upgrade non-EXACT entries to EXACT (safe for {-1,0,+1} values).
+        {
+            uint16_t cbx, cbo; int sym;
+            canonicalize(bx, bo, cbx, cbo, sym);
+            uint64_t hash = compute_hash(cbx, cbo);
+            auto it = tt_.find(hash);
+            if (it != tt_.end()) it->second.flag = EXACT;
+        }
+
+        // Expand children.
+        uint16_t occupied = bx | bo;
+        for (int cell = 0; cell < 16; ++cell) {
+            if (occupied & (1u << cell)) continue;
+
+            uint16_t new_bx = bx, new_bo = bo;
+            if (is_x_turn) new_bx |= static_cast<uint16_t>(1u << cell);
+            else           new_bo |= static_cast<uint16_t>(1u << cell);
+
+            uint16_t cbx, cbo; int sym;
+            canonicalize(new_bx, new_bo, cbx, cbo, sym);
+            uint64_t hash = compute_hash(cbx, cbo);
+            if (visited.count(hash)) continue;
+            visited[hash] = true;
+            queue.push_back({cbx, cbo});
+        }
+    }
+
+    // Pre-fill depth_cache_ for every non-terminal position so depth_to_end
+    // never inserts during concurrent gameplay.
+    for (const auto& pos : queue) {
+        int nx = std::popcount(static_cast<unsigned>(pos.bx));
+        int no = std::popcount(static_cast<unsigned>(pos.bo));
+        bool is_x_turn = (nx == no);
+        int depth = nx + no;
+
+        if (depth > 0) {
+            uint16_t last_bits = is_x_turn ? pos.bo : pos.bx;
+            if (has_line(last_bits)) continue;
+        }
+        if ((pos.bx | pos.bo) == 0xFFFF) continue;
+
+        depth_to_end(pos.bx, pos.bo, is_x_turn, depth);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // Draw position retrieval
 // ---------------------------------------------------------------------------
 

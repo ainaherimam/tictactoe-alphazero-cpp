@@ -109,7 +109,17 @@ void selfplay_worker(int worker_id,
 
     for (int game_num = 0; game_num < games_per_worker; ++game_num) {
 
-        Mcts_config config(1.4, 100, LogLevel::NONE, 0.0, 0.3, 0.25, queue, 10, false, 1);
+        Mcts_config config(
+        /*c_puct         =*/ 1.4,
+        /*iterations     =*/ 200,
+        LogLevel::NONE,
+        /*temperature    =*/ 0.0f,
+        /*dirichlet_alpha=*/ 0.5f,
+        /*dirichlet_eps  =*/ 0.25f,
+        queue,
+        /*max_depth      =*/ 12,
+        /*tree_reuse     =*/ false,
+        /*model_id       =*/ 0);
         
         auto player1 = std::make_unique<Mcts_player_selfplay>(config);
         auto player2 = std::make_unique<Mcts_player_selfplay>(config);
@@ -128,8 +138,8 @@ void selfplay_worker(int worker_id,
 int main(int argc, char** argv) {
 
     const size_t MAX_CAPACITY  = 75000;
-    const int    NUM_WORKERS   = 4;
-    const int    GAMES_PER_WORKER = 2500;
+    const int    NUM_WORKERS   = 12;
+    const int    GAMES_PER_WORKER = 8000;
 
     // Archive any leftover checkpoint folders / trigger files from previous runs.
     // archive_checkpoints("checkpoints/");

@@ -136,7 +136,7 @@ static void handle(std::shared_ptr<SharedMemoryInferenceQueue> queue,
         /*exploration_factor=*/ 1.4,
         /*number_iteration=*/   iterations,
         /*log_level=*/          LogLevel::NONE,
-        /*temperature=*/        0.1f,
+        /*temperature=*/        0.0f,
         /*dirichlet_alpha=*/    0.3f,
         /*dirichlet_epsilon=*/  0.0f,   // no noise: we want best play, not exploration
         /*queue=*/              queue,

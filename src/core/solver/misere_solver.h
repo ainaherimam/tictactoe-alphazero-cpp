@@ -64,6 +64,12 @@ public:
     /// Returns -1 if no move is available (terminal position).
     int get_best_move(uint16_t bx, uint16_t bo, bool is_x_turn);
 
+    /// Populate the TT with EXACT values for every reachable position and
+    /// pre-fill depth_cache_ so that get_best_move / get_position_value are
+    /// pure read-only lookups.  Call once after solve(), before any concurrent
+    /// access from multiple threads.
+    void populate_all_positions();
+
     struct DrawPosition {
         uint16_t bx;    // canonical X board
         uint16_t bo;    // canonical O board

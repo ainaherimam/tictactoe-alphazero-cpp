@@ -230,7 +230,7 @@ def infer_fn(boards, mask):
     # -------------------------------------------------------------------------
     inference_start = time.perf_counter()
 
-    log_policy, value = jit_predict(
+    log_policy, v_log_probs = jit_predict(
         MODEL_STATE['params'],
         MODEL_STATE['batch_stats'],
         boards_jax,
@@ -243,12 +243,14 @@ def infer_fn(boards, mask):
     inference_time = (time.perf_counter() - inference_start) * 1000  # ms
 
     # -------------------------------------------------------------------------
-    # TIMING 3: Post-processing — convert log-probs -> probs
+    # TIMING 3: Post-processing — convert log-probs -> probs, argmax value bin
     # -------------------------------------------------------------------------
     postprocess_start = time.perf_counter()
 
+    _support = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
     policy_np = np.asarray(jnp.exp(log_policy))
-    value_np  = np.asarray(value).reshape(batch_size, 1)
+    bin_idx   = np.argmax(np.asarray(v_log_probs), axis=-1)   # [B]  highest bin
+    value_np  = _support[bin_idx].reshape(batch_size, 1)       # [B, 1] as float
 
     postprocess_time = (time.perf_counter() - postprocess_start) * 1000  # ms
 

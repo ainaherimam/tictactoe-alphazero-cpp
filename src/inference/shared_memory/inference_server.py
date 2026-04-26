@@ -66,6 +66,7 @@ class InferenceServer:
         max_wait_ms: float = 1.0,
         log_interval: int = 10000,
         checkpoint_dir: Optional[str] = None,
+        categorical: bool = False,
     ):
         """
         Args:
@@ -82,6 +83,7 @@ class InferenceServer:
         self.log_interval = log_interval
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
         self.shm_name = shm_name
+        self.categorical = categorical
 
         self.latest_checkpoint_step = 0
         self.state_lock = threading.Lock()
@@ -92,14 +94,25 @@ class InferenceServer:
         # JIT-compile inference once. Closure captures model.apply (a pure
         # function); all runtime data (params, batch_stats, inputs, masks)
         # are passed as traced array arguments so JAX never has to retrace.
+        # Bin values for categorical head: {-1, 0, +1}
+        _bin_values = jnp.array([-1.0, 0.0, 1.0], dtype=jnp.float32)
+        _is_categorical = bool(categorical)
+
         @jax.jit
         def _inference(params, batch_stats, inputs, masks):
-            log_policy, values = model.apply(
+            log_policy, value_out = model.apply(
                 {'params': params, 'batch_stats': batch_stats},
                 inputs,
                 masks,
                 training=False,
             )
+            # log_policy: [B, 16] log-probs
+            # value_out:  [B] scalar tanh   OR   [B, 3] log-probs (categorical)
+            if _is_categorical:
+                # Convert categorical log-probs → scalar expected value in [-1, 1]
+                values = jnp.sum(jnp.exp(value_out) * _bin_values, axis=-1)
+            else:
+                values = value_out
             return jnp.exp(log_policy), values
 
         self._inference = _inference
@@ -214,6 +227,7 @@ class InferenceServer:
                 num_channels=self.model.num_channels,
                 num_res_blocks=self.model.num_res_blocks,
                 num_actions=POLICY_SIZE,
+                categorical=self.categorical,
             )
 
             print(f"[Reload]   Pre-compiling JIT...")
@@ -415,6 +429,8 @@ def main():
                         help='Number of residual blocks')
     parser.add_argument('--watch-checkpoints', type=str, default=None,
                         help='Directory to watch for checkpoint reload triggers (enables hot-reload)')
+    parser.add_argument('--categorical', action='store_true', default=False,
+                        help='Use categorical 3-bin value head (must match training).')
     args = parser.parse_args()
 
     print_log("AlphaZero JAX Inference Server")
@@ -438,6 +454,7 @@ def main():
         num_channels=args.num_channels,
         num_res_blocks=args.num_res_blocks,
         num_actions=POLICY_SIZE,
+        categorical=args.categorical,
     )
 
     rng = jax.random.PRNGKey(0)
@@ -451,6 +468,7 @@ def main():
                 num_channels=args.num_channels,
                 num_res_blocks=args.num_res_blocks,
                 num_actions=POLICY_SIZE,
+                categorical=args.categorical,
             )
             try:
                 initial_step = int(checkpoint_path.name.split("_")[1])
@@ -461,6 +479,7 @@ def main():
             print("⚠️  Continuing with random weights")
             inference_state = create_inference_state(
                 rng, args.num_channels, args.num_res_blocks, POLICY_SIZE,
+                categorical=args.categorical,
             )
             initial_step = 0
     else:
@@ -479,6 +498,7 @@ def main():
         max_wait_ms=args.max_wait_ms,
         log_interval=args.log_interval,
         checkpoint_dir=args.watch_checkpoints,
+        categorical=args.categorical,
     )
     server.latest_checkpoint_step = initial_step
     server.run()

@@ -64,15 +64,19 @@ Cell_state Game::play() {
 
         current_player = current_player_index == 0 ? Cell_state::X : Cell_state::O;
         
-        if (!is_evaluation) {
+        {
             auto* mcts = dynamic_cast<Mcts_player_selfplay*>(players[current_player_index].get());
-            if (current_game_moves_ < 6) {
+            if (mcts) {
+                if (current_game_moves_ < 2) {
+                    mcts->set_temperature(100.0);}
+                else if (current_game_moves_ < 6) {
                 mcts->set_temperature(1.0);
-            } else {
-                mcts->set_temperature(0.1);
+                } else {
+                    mcts->set_temperature(0.1);
+                }
             }
         }
-        
+
         // board.display_board(std::cout);
 
         auto [chosen_move, logits] = players[current_player_index]->choose_move(board, current_player);

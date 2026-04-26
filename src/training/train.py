@@ -37,7 +37,9 @@ from src.models.alphazero_model import (
     train_step,
     save_checkpoint,
     load_checkpoint,
+    compute_solver_metrics,
 )
+from src.core.solver.misere_solver import MisereSolver
 from src.constants import BOARD_HEIGHT, BOARD_WIDTH
 
 
@@ -123,6 +125,8 @@ def train(
     print()
     print("💡 Press Ctrl+C once to save and exit gracefully")
     print("   Press Ctrl+C twice to force quit\n")
+    if config.train_value_only:
+        print("⚠️  VALUE-ONLY MODE: policy head is frozen (random), only value head + body are trained.\n")
 
     # ── JAX seed ────────────────────────────────────────────────────────────
     rng = jax.random.PRNGKey(42)
@@ -151,6 +155,11 @@ def train(
         print("\n[Training] 🛑 Interrupted while waiting for data.")
         reader.close()
         return
+
+    # ── Perfect solver (populated once, read-only afterwards) ────────────────
+    print("[Training] Solving Misère 4x4 game tree...")
+    solver = MisereSolver()
+    solver.solve()
 
     # ── Initialise model ─────────────────────────────────────────────────────
     print("[Training] Initialising model...")
@@ -243,9 +252,31 @@ def train(
                         "mask":   jnp.array(batch_dict["mask"]),
                     }
 
-                    state, metrics = train_step(state, batch)
+                    state, metrics = train_step(
+                        state, batch, config.train_value_only, config.categorical
+                    )
 
                     step_time = time.time() - step_start
+
+                    # ── Solver-based policy accuracy (computed every log step) ─
+                    # Runs a non-JIT forward pass on the same batch to get NN
+                    # predictions, then compares both MCTS and NN top-1 moves
+                    # against the perfect solver's optimal moves.
+                    solver_metrics: dict = {}
+                    if step % config.log_every_n_steps == 0:
+                        (p_pred_log, _), _ = state.apply_fn(
+                            {"params": state.params, "batch_stats": state.batch_stats},
+                            batch["boards"],
+                            batch["mask"],
+                            training=False,
+                            mutable=[],
+                        )
+                        solver_metrics = compute_solver_metrics(
+                            boards     = batch_dict["boards"],
+                            pi_mcts    = batch_dict["pi"],
+                            p_pred_log = p_pred_log,
+                            solver     = solver,
+                        )
 
                     # ── Logging ──────────────────────────────────────────────
                     if step % config.log_every_n_steps == 0:
@@ -262,6 +293,8 @@ def train(
                                 f"H: {metrics['policy_entropy']:.3f} | "
                                 f"Acc: {metrics['value_accuracy']:.3f} | "
                                 f"Grad: {metrics['grad_norm']:.3f} | "
+                                f"Slv MCTS: {solver_metrics.get('policy_acc_mcts', 0.0):.3f} | "
+                                f"Slv NN: {solver_metrics.get('policy_acc_nn', 0.0):.3f} | "
                                 f"{samples_per_sec:.0f} samples/s"
                             )
                         else:
@@ -278,6 +311,8 @@ def train(
                                 "train/policy_top1_acc": float(metrics["policy_top1_acc"]),
                                 "train/policy_top2_acc": float(metrics["policy_top2_acc"]),
                                 "train/policy_top3_acc": float(metrics["policy_top3_acc"]),
+                                "train/policy_acc_mcts": solver_metrics.get("policy_acc_mcts", 0.0),
+                                "train/policy_acc_nn":   solver_metrics.get("policy_acc_nn",   0.0),
                                 "data/generation":      current_gen,
                                 "perf/samples_per_sec": samples_per_sec,
                                 "perf/steps_per_sec":   steps_per_sec,
@@ -347,15 +382,29 @@ def main():
     parser = argparse.ArgumentParser(description="JAX AlphaZero Training")
 
     # Data
-    parser.add_argument("--min-positions", type=int, default=5000)
-    parser.add_argument("--batch-size",    type=int, default=256)
-    parser.add_argument("--steps-per-gen", type=int, default=30)
+    parser.add_argument("--min-positions", type=int, default=2500)
+    parser.add_argument("--batch-size",    type=int, default=512)
+    parser.add_argument("--steps-per-gen", type=int, default=5)
 
     # Model
     parser.add_argument("--channels",     type=int, default=64)
-    parser.add_argument("--blocks",       type=int, default=3)
+    parser.add_argument("--blocks",       type=int, default=4)
     parser.add_argument("--train-every",  type=int, default=100)
     parser.add_argument("--evaluate-every", type=int, default=300)
+
+    # Training mode
+    parser.add_argument(
+        "--value-only",
+        action="store_true",
+        default=False,
+        help="Train only the value head (and shared body); policy head stays random.",
+    )
+    parser.add_argument(
+        "--categorical",
+        action="store_true",
+        default=False,
+        help="Use categorical 3-bin value head with cross-entropy loss (vs scalar tanh + MSE).",
+    )
 
     # Optimisation
     parser.add_argument("--lr",           type=float, default=0.001)
@@ -373,7 +422,7 @@ def main():
         default=False,
         help="Enable Weights & Biases logging.",
     )
-    parser.add_argument("--wandb-project", type=str, default="ttt-misere-4x4-alphazero")
+    parser.add_argument("--wandb-project", type=str, default="ttt-misere-4x4-az-encdoding")
     parser.add_argument("--wandb-entity",  type=str, default=None)
 
     args = parser.parse_args()
@@ -391,6 +440,8 @@ def main():
     config.train_every_n_gens    = args.train_every
     config.save_every_n_gens     = args.save_every
     config.verbose               = not args.quiet
+    config.train_value_only      = args.value_only
+    config.categorical           = args.categorical
 
     train(
         config,

@@ -8,16 +8,21 @@ Contains all model-related components:
 - JIT-compiled training step
 """
 
+import functools
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import flax.linen as nn
 from flax.training import train_state
-from typing import Tuple, Any, Dict, Optional
+from typing import Tuple, Any, Dict, Optional, TYPE_CHECKING
 import orbax.checkpoint as ocp
 from pathlib import Path
 
 from src.constants import INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH, POLICY_SIZE
+
+if TYPE_CHECKING:
+    from src.core.solver.misere_solver import MisereSolver
 
 
 # ============================================================================
@@ -46,32 +51,38 @@ class ResidualBlock(nn.Module):
 
 
 class AlphaZeroNet(nn.Module):
-    """AlphaZero neural network: board → (policy, value)."""
+    """AlphaZero neural network: board → (policy, value).
+
+    Value head:
+      - categorical=False (default): scalar tanh in [-1, 1]  — trained with MSE
+      - categorical=True:  log-probabilities over 3 bins {-1, 0, +1}  — trained with CE
+    """
     num_channels: int = 64
     num_res_blocks: int = 5
     num_actions: int = 16
-    
+    categorical: bool = False
+
     @nn.compact
     def __call__(self, x, mask, training: bool = True):
         # Input conv
         x = nn.Conv(self.num_channels, (3, 3), padding='SAME')(x)
         x = nn.BatchNorm(use_running_average=not training)(x)
         x = nn.relu(x)
-        
+
         # Residual tower
         for _ in range(self.num_res_blocks):
             x = ResidualBlock(self.num_channels)(x, training=training)
-        
+
         # Policy head
         p = nn.Conv(2, (1, 1))(x)
         p = nn.BatchNorm(use_running_average=not training)(p)
         p = nn.relu(p)
         p = p.reshape((p.shape[0], -1))  # Flatten
         p = nn.Dense(self.num_actions)(p)
-        
+
         # Apply log-softmax
         p = jax.nn.log_softmax(p, axis=-1)
-        
+
         # Value head
         v = nn.Conv(1, (1, 1))(x)
         v = nn.BatchNorm(use_running_average=not training)(v)
@@ -79,9 +90,13 @@ class AlphaZeroNet(nn.Module):
         v = v.reshape((v.shape[0], -1))  # Flatten
         v = nn.Dense(64)(v)
         v = nn.relu(v)
-        v = nn.Dense(1)(v)
-        v = jnp.tanh(v).squeeze(-1)
-        
+        if self.categorical:
+            v = nn.Dense(3)(v)                      # logits for bins [-1, 0, +1]
+            v = jax.nn.log_softmax(v, axis=-1)      # [B, 3] log-probabilities
+        else:
+            v = nn.Dense(1)(v)                      # [B, 1]
+            v = jnp.tanh(v).squeeze(-1)             # [B] scalar in [-1, 1]
+
         return p, v
 
 
@@ -98,19 +113,36 @@ class TrainStateWithBatchStats(train_state.TrainState):
 # LOSS FUNCTION
 # ============================================================================
 
-def alphazero_loss(params, state, batch):
+
+def scalar_to_categorical(z):
+    """Map z ∈ {-1, 0, +1} to one-hot over bins [loss, draw, win]."""
+    bin_idx = (z + 1).astype(jnp.int32)              # {-1,0,+1} → {0,1,2}
+    return jax.nn.one_hot(bin_idx, num_classes=3)     # [B, 3]
+
+
+def alphazero_loss(params, state, batch, train_value_only: bool = False,
+                   categorical: bool = False):
     """
-    Compute AlphaZero loss: cross-entropy(policy) + MSE(value).
+    Compute AlphaZero loss: cross-entropy(policy) + value loss.
+
+    Value loss is MSE for scalar head, cross-entropy for categorical head.
+
+    When train_value_only=True, only value_loss contributes to the gradient.
+    Policy head parameters receive zero gradient and remain at their initial
+    (random) values, while the shared body and value head are trained normally.
+
     Args:
         params: Model parameters
         state: Training state
         batch: Dict with keys 'boards', 'pi', 'z', 'mask'
+        train_value_only: If True, exclude policy loss from the gradient
+        categorical: If True, use categorical CE loss on 3-bin value head
     Returns:
         (total_loss, (metrics_dict, new_batch_stats))
     """
     boards = batch['boards']  # [B, 2, 4, 4]
     pi_target = batch['pi']   # [B, 16]
-    z_target = batch['z']     # [B]
+    z_target = batch['z']     # [B]  values in {-1, 0, +1}
     mask = batch['mask']      # [B, 16]
 
     # Forward pass
@@ -121,23 +153,30 @@ def alphazero_loss(params, state, batch):
         training=True,
         mutable=['batch_stats']
     )
+    # p_pred: [B, 16] log-probs
+    # v_pred: [B] scalar tanh  OR  [B, 3] log-probs (categorical)
 
     # Policy loss: cross-entropy with target distribution
     policy_loss = -jnp.sum(pi_target * p_pred, axis=-1).mean()
 
-    # Value loss: MSE
-    value_loss = jnp.mean((v_pred - z_target) ** 2)
+    # Value loss
+    if categorical:
+        z_onehot = scalar_to_categorical(z_target)              # [B, 3]
+        value_loss = -jnp.sum(z_onehot * v_pred, axis=-1).mean()
+    else:
+        value_loss = jnp.mean((v_pred - z_target.astype(jnp.float32)) ** 2)
 
-    # Total loss
-    total_loss = policy_loss + value_loss
+    # Total loss — when train_value_only, drop policy gradient entirely.
+    # policy_loss is still computed above for metric reporting.
+    total_loss = value_loss if train_value_only else policy_loss + value_loss
 
     # Policy accuracy metrics
-    top1_target = jnp.argmax(pi_target, axis=-1)         
-    top1_pred   = jnp.argmax(p_pred,   axis=-1)      
+    top1_target = jnp.argmax(pi_target, axis=-1)
+    top1_pred   = jnp.argmax(p_pred,   axis=-1)
 
     # Top-k indices of predicted logits (ascending, so slice from the end)
-    top3_pred_indices = jnp.argsort(p_pred, axis=-1)[:, -3:]   
-    top2_pred_indices = top3_pred_indices[:, -2:]              
+    top3_pred_indices = jnp.argsort(p_pred, axis=-1)[:, -3:]
+    top2_pred_indices = top3_pred_indices[:, -2:]
 
     # Check whether the greedy target action appears within top-k predictions
     policy_top1_acc = jnp.mean(top1_pred == top1_target)
@@ -150,13 +189,23 @@ def alphazero_loss(params, state, batch):
         jnp.any(top3_pred_indices == top1_target[:, None], axis=-1)
     )
 
+    # Value accuracy
+    if categorical:
+        # Predicted bin matches true bin
+        value_accuracy = jnp.mean(
+            jnp.argmax(v_pred, axis=-1) == (z_target + 1).astype(jnp.int32)
+        )
+    else:
+        # Predicted sign matches true sign (win/loss/draw)
+        value_accuracy = jnp.mean(jnp.sign(v_pred) == jnp.sign(z_target))
+
     # Metrics
     metrics = {
         'loss': total_loss,
         'policy_loss': policy_loss,
         'value_loss': value_loss,
         'policy_entropy': -jnp.sum(jnp.exp(p_pred) * p_pred, axis=-1).mean(),
-        'value_accuracy': jnp.mean(jnp.abs(v_pred - z_target) < 0.05),
+        'value_accuracy': value_accuracy,
         'policy_top1_acc': policy_top1_acc,   # pred top-1 == target top-1
         'policy_top2_acc': policy_top2_acc,   # target top-1 in pred top-2
         'policy_top3_acc': policy_top3_acc,   # target top-1 in pred top-3
@@ -168,20 +217,27 @@ def alphazero_loss(params, state, batch):
 # TRAINING STEP (JIT-COMPILED)
 # ============================================================================
 
-@jax.jit
-def train_step(state, batch):
+@functools.partial(jax.jit, static_argnums=(2, 3))
+def train_step(state, batch, train_value_only: bool = False,
+               categorical: bool = False):
     """
     Single gradient step.
-    
+
     Args:
         state: Training state with params, optimizer state, batch_stats
         batch: Dictionary with 'boards', 'pi', 'z', 'mask'
-    
+        train_value_only: If True, only the value head (and shared body) are
+            trained; policy head parameters receive zero gradient and remain
+            at their initial random values.
+        categorical: If True, use categorical value head + CE loss.
+
     Returns:
         (updated_state, metrics_dict)
     """
     grad_fn = jax.value_and_grad(alphazero_loss, has_aux=True)
-    (loss, (metrics, new_batch_stats)), grads = grad_fn(state.params, state, batch)
+    (loss, (metrics, new_batch_stats)), grads = grad_fn(
+        state.params, state, batch, train_value_only, categorical
+    )
     
     # Update parameters and batch stats
     state = state.apply_gradients(grads=grads)
@@ -191,6 +247,75 @@ def train_step(state, batch):
     metrics['grad_norm'] = optax.global_norm(grads)
     
     return state, metrics
+
+
+# ============================================================================
+# SOLVER-BASED POLICY ACCURACY METRICS
+# ============================================================================
+
+def compute_solver_metrics(
+    boards: np.ndarray,
+    pi_mcts: np.ndarray,
+    p_pred_log: np.ndarray,
+    solver: "MisereSolver",
+) -> Dict[str, float]:
+    """
+    Measure how well MCTS targets and NN predictions agree with the perfect solver.
+
+    For each board position the solver returns all optimal moves (moves that
+    achieve the game-theoretic value).  We then check whether the greedy
+    action from each policy falls among those optimal moves.
+
+    Args:
+        boards:      [B, 2, 4, 4]  float32 board planes (current, opponent)
+        pi_mcts:     [B, 16]       MCTS visit-count policy (the training target π)
+        p_pred_log:  [B, 16]       NN log-probabilities (output of the network)
+        solver:      pre-solved MisereSolver instance (call solver.solve() once first)
+
+    Returns:
+        Dict with:
+          'policy_acc_mcts' — fraction of positions where MCTS top-1 is solver-optimal
+          'policy_acc_nn'   — fraction of positions where NN  top-1 is solver-optimal
+    """
+    from src.core.solver.misere_solver import board_to_masks
+
+    boards_np   = np.asarray(boards)
+    pi_np       = np.asarray(pi_mcts)
+    p_pred_np   = np.asarray(p_pred_log)
+
+    B = boards_np.shape[0]
+    mcts_correct = 0
+    nn_correct   = 0
+    valid_count  = 0
+
+    for i in range(B):
+        bx, bo, is_x_turn = board_to_masks(boards_np[i])
+        optimal = set(solver.get_optimal_moves(bx, bo, is_x_turn))
+        if not optimal:
+            continue
+
+        valid_count += 1
+
+        if int(np.argmax(pi_np[i])) in optimal:
+            mcts_correct += 1
+
+        # Mask occupied cells before argmax: NN log-softmax is over all 16
+        # cells, so the raw argmax can land on an occupied cell.
+        occupied = bx | bo
+        nn_logits = p_pred_np[i].copy()
+        for c in range(16):
+            if occupied & (1 << c):
+                nn_logits[c] = -np.inf
+        if int(np.argmax(nn_logits)) in optimal:
+            nn_correct += 1
+
+    if valid_count == 0:
+        return {"policy_acc_mcts": 0.0, "policy_acc_nn": 0.0}
+
+    return {
+        "policy_acc_mcts": mcts_correct / valid_count,
+        "policy_acc_nn":   nn_correct   / valid_count,
+    }
 
 
 # ============================================================================
@@ -225,12 +350,17 @@ class TrainingConfig:
     evaluate_every_n_gens: int = 300
     train_every_n_gens: int = 100
     
+    # Training mode
+    train_value_only: bool = False       # If True, freeze policy head (value head + body only)
+    categorical: bool = False            # If True, use categorical 3-bin value head + CE loss
+
     # Logging
     log_every_n_steps: int = 10         # Print metrics every N steps
     verbose: bool = True                # Detailed logging
 
 
-def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3, num_actions: int = POLICY_SIZE):
+def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3,
+                           num_actions: int = POLICY_SIZE, categorical: bool = False):
     """
     Initialize model for inference only (no optimizer).
 
@@ -247,15 +377,16 @@ def create_inference_state(rng, num_channels: int = 64, num_res_blocks: int = 3,
     model = AlphaZeroNet(
         num_channels=num_channels,
         num_res_blocks=num_res_blocks,
-        num_actions=num_actions
+        num_actions=num_actions,
+        categorical=categorical,
     )
 
     # Initialize with dummy input
     dummy_board = jnp.zeros((1, INPUT_CHANNELS, BOARD_HEIGHT, BOARD_WIDTH))
     dummy_mask = jnp.ones((1, num_actions))
-    
+
     variables = model.init(rng, dummy_board, dummy_mask, training=False)
-    
+
     return {
         'params': variables['params'],
         'batch_stats': variables['batch_stats'],
@@ -279,7 +410,8 @@ def create_train_state(rng, config: TrainingConfig):
     model = AlphaZeroNet(
         num_channels=config.num_channels,
         num_res_blocks=config.num_res_blocks,
-        num_actions=POLICY_SIZE
+        num_actions=POLICY_SIZE,
+        categorical=config.categorical,
     )
 
     # Initialize with dummy input
@@ -407,7 +539,8 @@ def load_checkpoint_for_inference(
     checkpoint_path: str,
     num_channels: int = 64,
     num_res_blocks: int = 3,
-    num_actions: int = 16
+    num_actions: int = 16,
+    categorical: bool = False,
 ) -> Dict:
     """
     Load checkpoint for inference only (no optimizer).
@@ -434,9 +567,10 @@ def load_checkpoint_for_inference(
     model = AlphaZeroNet(
         num_channels=num_channels,
         num_res_blocks=num_res_blocks,
-        num_actions=num_actions
+        num_actions=num_actions,
+        categorical=categorical,
     )
-    
+
     print(f"[Checkpoint] ✓ Loaded inference weights")
     
     return {

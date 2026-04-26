@@ -25,10 +25,10 @@ if(DEFINED ENV{TRITON_CLIENT_DIR})
     set(TRITON_CLIENT_DIR $ENV{TRITON_CLIENT_DIR})
     message(STATUS "Using Triton from environment: ${TRITON_CLIENT_DIR}")
 elseif(EXISTS "${CMAKE_SOURCE_DIR}/triton_client")
-    set(TRITON_CLIENT_DIR "/mnt/c/Users/Aina/Coding/tictactoe-alphazero-cpp/triton_client")
+    set(TRITON_CLIENT_DIR "/home/aina/Documents/lastest/triton_client")
     message(STATUS "Using local Triton installation: ${TRITON_CLIENT_DIR}")
 elseif(EXISTS "$ENV{HOME}/triton_client")
-    set(TRITON_CLIENT_DIR "/mnt/c/Users/Aina/Coding/tictactoe-alphazero-cpp/triton_client")
+    set(TRITON_CLIENT_DIR "/home/aina/Documents/lastest/triton_client")
     message(STATUS "Using Triton from home directory: ${TRITON_CLIENT_DIR}")
 else()
     message(WARNING "Triton client directory not found. Set TRITON_CLIENT_DIR or place triton_client/ in the project root.")
@@ -134,9 +134,40 @@ add_executable(AlphaZero_MCTS_Server
     executables/mcts_server.cpp
 )
 
+add_executable(AlphaZero_TTT_Eval_Solver
+    executables/eval_against_solver.cpp
+    src/core/solver/misere_solver.cpp
+)
+
+add_executable(AlphaZero_TTT_Eval_Elo
+    executables/eval_elo.cpp
+    src/core/solver/misere_solver.cpp
+)
+
+add_executable(GenerateInitialBoards
+    executables/generate_initial_boards.cpp
+    src/core/solver/misere_solver.cpp
+)
+
+target_include_directories(GenerateInitialBoards PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_compile_options(GenerateInitialBoards PRIVATE -O3 -march=native -DNDEBUG)
+
+# Auto-regenerate initial_boards.h and initial_boards.txt after every build
+add_custom_command(TARGET GenerateInitialBoards POST_BUILD
+    COMMAND ${CMAKE_SOURCE_DIR}/GenerateInitialBoards
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Regenerating initial_boards.h and initial_boards.txt"
+    VERBATIM
+)
+
 target_link_libraries(AlphaZero_TTT PRIVATE az_core)
 target_link_libraries(AlphaZero_TTT_Eval PRIVATE az_core)
 target_link_libraries(AlphaZero_MCTS_Server PRIVATE az_core)
+target_link_libraries(AlphaZero_TTT_Eval_Solver PRIVATE az_core)
+target_link_libraries(AlphaZero_TTT_Eval_Elo PRIVATE az_core)
 
 # ============================================================
 # === Misere Solver =========================================
@@ -197,8 +228,11 @@ foreach(target
     AlphaZero_TTT
     AlphaZero_TTT_Eval
     AlphaZero_MCTS_Server
+    AlphaZero_TTT_Eval_Solver
+    AlphaZero_TTT_Eval_Elo
     MisereSolver
     NegamaxServer
+    GenerateInitialBoards
 )
     set_property(TARGET ${target}
         PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE
@@ -213,8 +247,11 @@ install(TARGETS
     AlphaZero_TTT
     AlphaZero_TTT_Eval
     AlphaZero_MCTS_Server
+    AlphaZero_TTT_Eval_Solver
+    AlphaZero_TTT_Eval_Elo
     MisereSolver
     NegamaxServer
+    GenerateInitialBoards
 )
 
 # ============================================================
